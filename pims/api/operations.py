@@ -11,30 +11,41 @@
 #  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #  * See the License for the specific language governing permissions and
 #  * limitations under the License.
+
 import logging
 import os
 import traceback
 from typing import Optional
-import aiofiles
 
+import aiofiles
 from cytomine import Cytomine
-from cytomine.models import (
-    Project, ProjectCollection, Storage, UploadedFile
+from cytomine.models import Project, ProjectCollection, Storage, UploadedFile
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from starlette.formparsers import (
+    MultiPartMessage,
+    MultiPartParser,
+    _user_safe_decode,
 )
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, UploadFile
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
-from starlette.formparsers import MultiPartMessage, MultiPartParser, _user_safe_decode
 
 from pims.api.exceptions import (
-    AuthenticationException, BadRequestException, CytomineProblem,
-    check_representation_existence
+    AuthenticationException,
+    BadRequestException,
+    CytomineProblem,
+    check_representation_existence,
 )
 from pims.api.utils.cytomine_auth import (
-    get_this_image_server, parse_authorization_header,
-    parse_request_token, sign_token
+    get_this_image_server,
+    parse_authorization_header,
+    parse_request_token,
+    sign_token,
 )
-from pims.api.utils.parameter import filepath_parameter, imagepath_parameter, sanitize_filename
+from pims.api.utils.parameter import (
+    filepath_parameter,
+    imagepath_parameter,
+    sanitize_filename,
+)
 from pims.api.utils.response import serialize_cytomine_model
 from pims.config import Settings, get_settings
 from pims.files.archive import make_zip_archive
@@ -57,6 +68,34 @@ router = APIRouter()
 cytomine_logger = logging.getLogger("pims.cytomine")
 
 WRITING_PATH = get_settings().writing_path
+
+
+@router.post("/import", tags=["Import"])
+def import_dataset(
+    path: str = Query(..., description="The absolute path to the dataset to import"),
+) -> JSONResponse:
+    """Import a dataset from a given absolute path."""
+
+    if not os.path.exists(path):
+        raise HTTPException(
+            status_code=422, detail="The provided dataset path does not exist."
+        )
+
+    required_dirs = ["metadata", "images", "annotations"]
+    missing_dirs = [
+        dir_name
+        for dir_name in required_dirs
+        if not os.path.isdir(os.path.join(path, dir_name))
+    ]
+
+    if missing_dirs:
+        raise HTTPException(
+            status_code=422,
+            detail=f"The required directories are missing: {', '.join(missing_dirs)}.",
+        )
+
+    return JSONResponse(content={"status": "ok"})
+
 
 @router.post('/upload', tags=['Import'])
 async def import_direct_chunks(
