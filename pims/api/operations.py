@@ -19,7 +19,13 @@ from typing import Optional
 
 import aiofiles
 from cytomine import Cytomine
-from cytomine.models import Project, ProjectCollection, Storage, UploadedFile
+from cytomine.models import (
+    AbstractImage,
+    Project,
+    ProjectCollection,
+    Storage,
+    UploadedFile,
+)
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from starlette.formparsers import (
     MultiPartMessage,
@@ -50,9 +56,12 @@ from pims.api.utils.response import serialize_cytomine_model
 from pims.config import Settings, get_settings
 from pims.files.archive import make_zip_archive
 from pims.files.file import Path
+from pims.files.image import Image
+from pims.formats.utils.factories import ImportableFormatFactory
 from pims.importer.importer import run_import
 from pims.importer.listeners import CytomineListener
 from pims.tasks.queue import Task, send_task
+from pims.utils.dtypes import dtype_to_bits
 from pims.utils.iterables import ensure_list
 from pims.utils.strings import unique_name_generator
 
@@ -66,19 +75,36 @@ except ModuleNotFoundError:  # pragma: nocover
 router = APIRouter()
 
 cytomine_logger = logging.getLogger("pims.cytomine")
+logger = logging.getLogger("pims")
 
 WRITING_PATH = get_settings().writing_path
 
 
+def get_folder_size(folder_path):
+    """Get the total size in bytes of a folder."""
+    total_size = 0
+    for dirpath, _, filenames in os.walk(folder_path):
+        for file in filenames:
+            file_path = os.path.join(dirpath, file)
+            total_size += os.path.getsize(file_path)
+
+    return total_size
+
+
 @router.post("/import", tags=["Import"])
 def import_dataset(
+    request: Request,
+    host: str = Query(..., description="The Cytomine host"),
     path: str = Query(..., description="The absolute path to the dataset to import"),
+    storage: int = Query(..., description="The storage where to import the dataset"),
+    config: Settings = Depends(get_settings)
 ) -> JSONResponse:
     """Import a dataset from a given absolute path."""
 
     if not os.path.exists(path):
         raise HTTPException(
-            status_code=422, detail="The provided dataset path does not exist."
+            status_code=404,
+            detail="The provided dataset path does not exist.",
         )
 
     required_dirs = ["metadata", "images", "annotations"]
@@ -90,11 +116,71 @@ def import_dataset(
 
     if missing_dirs:
         raise HTTPException(
-            status_code=422,
+            status_code=404,
             detail=f"The required directories are missing: {', '.join(missing_dirs)}.",
         )
 
-    return JSONResponse(content={"status": "ok"})
+    if not storage:
+        raise BadRequestException(detail="storage parameter is missing.")
+
+    logger.info(f"Parse headers from request: {request.headers}")
+    public_key, signature = parse_authorization_header(request.headers)
+    cytomine_auth = (host, config.cytomine_public_key, config.cytomine_private_key)
+
+    with Cytomine(*cytomine_auth, configure_logging=False) as c:
+        if not c.current_user:
+            raise AuthenticationException("PIMS authentication to Cytomine failed.")
+
+    this = get_this_image_server(config.pims_url)
+
+    images_path = os.path.join(path, "images")
+
+    for image in os.listdir(images_path):
+        logger.info(f"Importing image: {image}")
+        image_path = os.path.join(images_path, image)
+        if not os.path.isdir(image_path):
+            continue
+
+        logger.info(f"Create UploadedFile")
+        uf = UploadedFile(
+            sanitize_filename(image),
+            image_path,
+            get_folder_size(image_path),
+            id_storage=storage,
+            id_user=this.id,
+            id_image_server=this.id,
+            status=UploadedFile.UPLOADED,
+        )
+        uf.save()
+        logger.info(f"UploadedFile created")
+
+        logger.info(f"Detect format")
+        format_factory = ImportableFormatFactory()
+        format = format_factory.match(Path(image_path))
+        image = Image(image_path, format=format)
+
+        logger.info(f"Create AbstractImage")
+        ai = AbstractImage()
+        ai.uploadedFile = uf.id
+        ai.originalFilename = uf.originalFilename
+        ai.width = image.width
+        ai.height = image.height
+        ai.depth = image.depth
+        ai.duration = image.duration
+
+        ai.channels = image.n_concrete_channels
+        ai.samplePerPixel = image.n_samples
+        ai.bitPerSample = dtype_to_bits(image.pixel_type)
+        ai.save()
+        logger.info(f"AbstractImage created")
+
+    return JSONResponse(
+        content={
+            "status": "ok",
+            "pub": public_key,
+            "sig": signature
+        }
+    )
 
 
 @router.post('/upload', tags=['Import'])
