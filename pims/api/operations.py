@@ -96,7 +96,7 @@ def import_dataset(
     request: Request,
     host: str = Query(..., description="The Cytomine host"),
     path: str = Query(..., description="The absolute path to the dataset to import"),
-    storage: int = Query(..., description="The storage where to import the dataset"),
+    storage_id: int = Query(..., description="The storage where to import the dataset"),
     config: Settings = Depends(get_settings)
 ) -> JSONResponse:
     """Import a dataset from a given absolute path."""
@@ -120,7 +120,7 @@ def import_dataset(
             detail=f"The required directories are missing: {', '.join(missing_dirs)}.",
         )
 
-    if not storage:
+    if not storage_id:
         raise BadRequestException(detail="storage parameter is missing.")
 
     logger.info(f"Parse headers from request: {request.headers}")
@@ -128,11 +128,27 @@ def import_dataset(
     cytomine_auth = (host, config.cytomine_public_key, config.cytomine_private_key)
 
     with Cytomine(*cytomine_auth, configure_logging=False) as c:
+        logger.info(f"Logged as {c}")
         if not c.current_user:
             raise AuthenticationException("PIMS authentication to Cytomine failed.")
 
-    this = get_this_image_server(config.pims_url)
+        this = get_this_image_server(config.pims_url)
+        cyto_keys = c.get(f"userkey/{public_key}/keys.json")
+        private_key = cyto_keys["privateKey"]
 
+        logger.info(f"SIG {sign_token(private_key, parse_request_token(request))} == {signature}")
+        if sign_token(private_key, parse_request_token(request)) != signature:
+            raise AuthenticationException("Authentication to Cytomine failed")
+
+        c.set_credentials(public_key, private_key)
+        user = c.current_user
+
+        logger.info(f"Get storage {storage_id}")
+        storage = Storage().fetch(storage_id)
+        if not storage:
+            raise CytomineProblem(f"Storage {storage_id} not found")
+
+    logger.info("Import the images...")
     images_path = os.path.join(path, "images")
 
     for image in os.listdir(images_path):
@@ -146,8 +162,8 @@ def import_dataset(
             sanitize_filename(image),
             image_path,
             get_folder_size(image_path),
-            id_storage=storage,
-            id_user=this.id,
+            id_storage=storage.id,
+            id_user=user.id,
             id_image_server=this.id,
             status=UploadedFile.UPLOADED,
         )
