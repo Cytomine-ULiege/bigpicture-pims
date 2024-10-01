@@ -162,6 +162,8 @@ def import_dataset(
             sanitize_filename(image),
             image_path,
             get_folder_size(image_path),
+            ext="",
+            content_type="",
             id_storage=storage.id,
             id_user=user.id,
             id_image_server=this.id,
