@@ -21,6 +21,8 @@ import aiofiles
 from cytomine import Cytomine
 from cytomine.models import (
     AbstractImage,
+    AbstractSlice,
+    AbstractSliceCollection,
     Project,
     ProjectCollection,
     Storage,
@@ -64,6 +66,7 @@ from pims.tasks.queue import Task, send_task
 from pims.utils.dtypes import dtype_to_bits
 from pims.utils.iterables import ensure_list
 from pims.utils.strings import unique_name_generator
+from pims.utils.types import parse_int
 
 try:
     import multipart
@@ -157,24 +160,25 @@ def import_dataset(
         if not os.path.isdir(image_path):
             continue
 
+        logger.info(f"Detect format")
+        format_factory = ImportableFormatFactory()
+        format = format_factory.match(Path(image_path))
+
         logger.info(f"Create UploadedFile")
         uf = UploadedFile(
             sanitize_filename(image),
             image_path,
             get_folder_size(image_path),
             ext="",
-            content_type="",
+            content_type=format.get_identifier(),
             id_storage=storage.id,
             id_user=user.id,
             id_image_server=this.id,
-            status=UploadedFile.UPLOADED,
+            status=UploadedFile.DEPLOYED,
         )
         uf.save()
         logger.info(f"UploadedFile created")
 
-        logger.info(f"Detect format")
-        format_factory = ImportableFormatFactory()
-        format = format_factory.match(Path(image_path))
         image = Image(image_path, format=format)
 
         logger.info(f"Create AbstractImage")
@@ -189,16 +193,41 @@ def import_dataset(
         ai.channels = image.n_concrete_channels
         ai.samplePerPixel = image.n_samples
         ai.bitPerSample = dtype_to_bits(image.pixel_type)
+        ai.magnification = parse_int(image.objective.nominal_magnification)
+
         ai.save()
         logger.info(f"AbstractImage created")
 
-    return JSONResponse(
-        content={
-            "status": "ok",
-            "pub": public_key,
-            "sig": signature
-        }
-    )
+        logger.info("Create the corresponding abstract slices")
+        asc = AbstractSliceCollection()
+        for cc in range(image.n_concrete_channels):
+            first_c = cc * image.n_samples
+
+            name = image.channels[first_c].suggested_name
+            color = image.channels[first_c].hex_color
+            if image.n_samples != 1:
+                names = [
+                    image.channels[i].suggested_name
+                    for i in range(first_c, first_c + image.n_samples)
+                    if image.channels[i].suggested_name is not None
+                ]
+                names = list(dict.fromkeys(names))
+                name = '|'.join(names)
+                color = None
+
+            for z in range(image.depth):
+                for t in range(image.duration):
+                    mime = "image/pyrtiff"
+                    asc.append(
+                        AbstractSlice(
+                            ai.id, uf.id, mime, cc, z, t,
+                            channelName=name, channelColor=color
+                        )
+                    )
+        asc.save()
+        logger.info("Abstract Slice created")
+
+    return JSONResponse(content={"status": "ok"})
 
 
 @router.post('/upload', tags=['Import'])
