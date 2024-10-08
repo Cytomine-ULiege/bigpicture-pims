@@ -61,7 +61,7 @@ from pims.files.archive import make_zip_archive
 from pims.files.file import Path
 from pims.files.image import Image
 from pims.formats.utils.factories import ImportableFormatFactory
-from pims.importer.importer import run_import
+from pims.importer.importer import run_import, run_import_from_path
 from pims.importer.listeners import CytomineListener
 from pims.tasks.queue import Task, send_task
 from pims.utils.dtypes import dtype_to_bits
@@ -155,81 +155,8 @@ def import_dataset(
         if not storage:
             raise CytomineProblem(f"Storage {storage_id} not found")
 
-    logger.info("Import the images...")
-    images_path = os.path.join(path, "images")
-
-    for image in os.listdir(images_path):
-        logger.info(f"Importing image: {image}")
-        image_path = os.path.join(images_path, image)
-        if not os.path.isdir(image_path):
-            continue
-
-        logger.info(f"Detect format")
-        format_factory = ImportableFormatFactory()
-        format = format_factory.match(Path(image_path))
-
-        logger.info(f"Create UploadedFile")
-        uf = UploadedFile(
-            sanitize_filename(image),
-            image_path,
-            get_folder_size(image_path),
-            ext="",
-            content_type=format.get_identifier(),
-            id_storage=storage.id,
-            id_user=user.id,
-            id_image_server=this.id,
-            status=UploadedFile.DEPLOYED,
-        )
-        uf.save()
-        logger.info(f"UploadedFile created")
-
-        image = Image(image_path, format=format)
-
-        logger.info(f"Create AbstractImage")
-        ai = AbstractImage()
-        ai.uploadedFile = uf.id
-        ai.originalFilename = uf.originalFilename
-        ai.width = image.width
-        ai.height = image.height
-        ai.depth = image.depth
-        ai.duration = image.duration
-
-        ai.channels = image.n_concrete_channels
-        ai.samplePerPixel = image.n_samples
-        ai.bitPerSample = dtype_to_bits(image.pixel_type)
-        ai.magnification = parse_int(image.objective.nominal_magnification)
-
-        ai.save()
-        logger.info(f"AbstractImage created")
-
-        logger.info("Create the corresponding abstract slices")
-        asc = AbstractSliceCollection()
-        for cc in range(image.n_concrete_channels):
-            first_c = cc * image.n_samples
-
-            name = image.channels[first_c].suggested_name
-            color = image.channels[first_c].hex_color
-            if image.n_samples != 1:
-                names = [
-                    image.channels[i].suggested_name
-                    for i in range(first_c, first_c + image.n_samples)
-                    if image.channels[i].suggested_name is not None
-                ]
-                names = list(dict.fromkeys(names))
-                name = '|'.join(names)
-                color = None
-
-            for z in range(image.depth):
-                for t in range(image.duration):
-                    mime = "image/pyrtiff"
-                    asc.append(
-                        AbstractSlice(
-                            ai.id, uf.id, mime, cc, z, t,
-                            channelName=name, channelColor=color
-                        )
-                    )
-        asc.save()
-        logger.info("Abstract Slice created")
+    for dataset in datasets:
+        run_import_from_path(dataset, extra_listeners=[])
 
     return JSONResponse(content={"status": "ok"})
 

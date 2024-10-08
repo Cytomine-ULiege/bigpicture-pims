@@ -49,7 +49,6 @@ from pims.utils.strings import unique_name_generator
 
 log = logging.getLogger("pims.app")
 
-DATASET_PATH = Path(get_settings().dataset_path)
 FILE_ROOT_PATH = Path(get_settings().root)
 FILESYSTEM_PATH = Path(get_settings().writable_fs)
 PENDING_PATH = Path(get_settings().pending_path)
@@ -521,7 +520,8 @@ class FileImporter:
 
             self.notify(
                 ImportEventType.MOVED_PENDING_FILE,
-                self.pending_file, self.upload_path
+                self.pending_file,
+                self.upload_path,
             )
             self.notify(ImportEventType.END_DATA_EXTRACTION, self.upload_path)
 
@@ -541,9 +541,7 @@ class FileImporter:
             self.processed_dir = self.upload_dir / Path(PROCESSED_DIR)
             self.mkdir(self.processed_dir)
 
-            original_filename = Path(
-                f"{ORIGINAL_STEM}.{format.get_identifier()}"
-            )
+            original_filename = Path(f"{ORIGINAL_STEM}.{format.get_identifier()}")
             self.original_path = self.processed_dir / original_filename
    
             self.mksymlink(self.original_path, self.upload_path)
@@ -554,8 +552,9 @@ class FileImporter:
             errors = self.original.check_integrity(check_metadata=True)
             if len(errors) > 0:
                 self.notify(
-                    ImportEventType.ERROR_INTEGRITY_CHECK, self.original_path,
-                    integrity_errors=errors
+                    ImportEventType.ERROR_INTEGRITY_CHECK,
+                    self.original_path,
+                    integrity_errors=errors,
                 )
                 raise ImageParsingProblem(self.original)
             self.notify(ImportEventType.END_INTEGRITY_CHECK, self.original)
@@ -581,6 +580,35 @@ class FileImporter:
             )
             raise e
 
+
+class DatasetImporter:
+    """Class that imports all the images from a directory."""
+
+    def __init__(
+        self,
+        dataset_path: str,
+        extra_listeners: Optional[List[ImportListener]] = None,
+        prefer_copy: bool = False,
+    ) -> None:
+        self.dataset_path = dataset_path
+        self.extra_listeners = extra_listeners
+        self.prefer_copy = prefer_copy
+
+    def import_dataset(self) -> None:
+        """Import all the images from a dataset"""
+
+        images_path = Path(os.path.join(self.dataset_path, "images"))
+        for item in images_path.iterdir():
+            if not item.is_dir():
+                continue
+
+            listeners = [StdoutListener(item.name)] + self.extra_listeners
+            image_path = Path(os.path.join(images_path, item))
+
+            fi = FileImporter(image_path, item.name, listeners)
+            fi.import_from_path()
+
+
 def run_import(
     filepath: str, name: str, extra_listeners: Optional[List[ImportListener]] = None,
     prefer_copy: bool = False
@@ -596,3 +624,13 @@ def run_import(
     listeners = [StdoutListener(name)] + extra_listeners
     fi = FileImporter(pending_file, name, listeners)
     fi.run(prefer_copy)
+
+
+def run_import_from_path(
+    dataset_path: str,
+    extra_listeners: Optional[List[ImportListener]] = None,
+    prefer_copy: bool = False,
+) -> None:
+    """Run importer from a given path."""
+
+    DatasetImporter(dataset_path, extra_listeners, prefer_copy).import_dataset()
