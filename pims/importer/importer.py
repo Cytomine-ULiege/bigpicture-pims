@@ -49,9 +49,11 @@ from pims.utils.strings import unique_name_generator
 
 log = logging.getLogger("pims.app")
 
+DATASET_PATH = Path(get_settings().dataset_path)
+FILE_ROOT_PATH = Path(get_settings().root)
+FILESYSTEM_PATH = Path(get_settings().writable_fs)
 PENDING_PATH = Path(get_settings().pending_path)
 WRITING_PATH = Path(get_settings().writing_path)
-FILE_ROOT_PATH = Path(get_settings().root)
 
 
 class FileErrorProblem(BadRequestException):
@@ -503,7 +505,7 @@ class FileImporter:
                 f"{UPLOAD_DIR_PREFIX}"
                 f"{str(unique_name_generator())}"
             )
-            self.upload_dir = FILE_ROOT_PATH / upload_dir_name
+            self.upload_dir = FILESYSTEM_PATH / upload_dir_name
             self.mkdir(self.upload_dir)
 
             if self.pending_name:

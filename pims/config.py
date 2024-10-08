@@ -23,7 +23,9 @@ logger = logging.getLogger("pims.app")
 
 class ReadableSettings(BaseSettings):
     root: str
+    dataset_path: str = "/dataset"
     pending_path: str = "/tmp/uploaded"
+    writable_fs: str = "/data/pims"
     writing_path: str = "/data/pims/tmp"
     checker_resolution_file: str = "checkerResolution.csv"
     default_image_size_safety_mode: str = "SAFE_REJECT"
