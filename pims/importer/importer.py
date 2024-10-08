@@ -492,7 +492,92 @@ class FileImporter:
                 _sequential_imports()
 
         return imported
+    
+    def import_from_path(self, prefer_copy: bool = False):
+        """Import a file from a given path."""
 
+        try:
+            self.notify(ImportEventType.START_DATA_EXTRACTION, self.pending_file)
+
+            upload_dir_name = Path(
+                f"{UPLOAD_DIR_PREFIX}"
+                f"{str(unique_name_generator())}"
+            )
+            self.upload_dir = FILE_ROOT_PATH / upload_dir_name
+            self.mkdir(self.upload_dir)
+
+            if self.pending_name:
+                name = self.pending_name
+            else:
+                name = self.pending_file.name
+            self.upload_path = self.upload_dir / name
+
+            self.move(self.pending_file, self.upload_path, prefer_copy)
+
+            if not prefer_copy and self.pending_file.is_extracted():
+                self.mksymlink(self.pending_file, self.upload_path)
+
+            self.notify(
+                ImportEventType.MOVED_PENDING_FILE,
+                self.pending_file, self.upload_path
+            )
+            self.notify(ImportEventType.END_DATA_EXTRACTION, self.upload_path)
+
+            self.notify(ImportEventType.START_FORMAT_DETECTION, self.upload_path)
+
+            format_factory = ImportableFormatFactory()
+            format = format_factory.match(self.upload_path)
+
+            if format is None:
+                self.notify(ImportEventType.ERROR_NO_FORMAT, self.upload_path)
+                raise NoMatchingFormatProblem(self.upload_path)
+            self.notify(
+                ImportEventType.END_FORMAT_DETECTION,
+                self.upload_path, format
+            )
+
+            self.processed_dir = self.upload_dir / Path(PROCESSED_DIR)
+            self.mkdir(self.processed_dir)
+
+            original_filename = Path(
+                f"{ORIGINAL_STEM}.{format.get_identifier()}"
+            )
+            self.original_path = self.processed_dir / original_filename
+   
+            self.mksymlink(self.original_path, self.upload_path)
+            assert self.original_path.has_original_role()
+
+            self.notify(ImportEventType.START_INTEGRITY_CHECK, self.original_path)
+            self.original = Image(self.original_path, format=format)
+            errors = self.original.check_integrity(check_metadata=True)
+            if len(errors) > 0:
+                self.notify(
+                    ImportEventType.ERROR_INTEGRITY_CHECK, self.original_path,
+                    integrity_errors=errors
+                )
+                raise ImageParsingProblem(self.original)
+            self.notify(ImportEventType.END_INTEGRITY_CHECK, self.original)
+
+            if not format.is_spatial():
+                raise NotImplementedError()
+
+            self.deploy_spatial(format)
+
+            self.deploy_histogram(self.original.get_spatial())
+
+            self.notify(
+                ImportEventType.END_SUCCESSFUL_IMPORT,
+                self.upload_path,
+                self.original,
+            )
+            return [self.upload_path]
+        except Exception as e:
+            self.notify(
+                ImportEventType.FILE_ERROR,
+                self.upload_path,
+                exception=e,
+            )
+            raise e
 
 def run_import(
     filepath: str, name: str, extra_listeners: Optional[List[ImportListener]] = None,
