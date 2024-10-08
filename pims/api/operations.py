@@ -41,6 +41,7 @@ from pims.api.exceptions import (
     AuthenticationException,
     BadRequestException,
     CytomineProblem,
+    NotFoundException,
     check_representation_existence,
 )
 from pims.api.utils.cytomine_auth import (
@@ -80,6 +81,7 @@ router = APIRouter()
 cytomine_logger = logging.getLogger("pims.cytomine")
 logger = logging.getLogger("pims")
 
+REQUIRED_DIRECTORIES = ["metadata", "images"]
 WRITING_PATH = get_settings().writing_path
 
 
@@ -93,38 +95,40 @@ def get_folder_size(folder_path):
 
     return total_size
 
+def is_dataset_structured(dataset_path: str) -> bool:
+    """Check the structure of a dataset."""
+
+    missing_directories = [
+        directory
+        for directory in REQUIRED_DIRECTORIES
+        if not os.path.isdir(os.path.join(dataset_path, directory))
+    ]
+
+    return missing_directories == []
+
 
 @router.post("/import", tags=["Import"])
 def import_dataset(
     request: Request,
     host: str = Query(..., description="The Cytomine host"),
-    path: str = Query(..., description="The absolute path to the dataset to import"),
+    path: str = Query(..., description="The absolute path to the datasets to import"),
     storage_id: int = Query(..., description="The storage where to import the dataset"),
     config: Settings = Depends(get_settings)
 ) -> JSONResponse:
     """Import a dataset from a given absolute path."""
 
-    if not os.path.exists(path):
-        raise HTTPException(
-            status_code=404,
-            detail="The provided dataset path does not exist.",
-        )
-
-    required_dirs = ["metadata", "images", "annotations"]
-    missing_dirs = [
-        dir_name
-        for dir_name in required_dirs
-        if not os.path.isdir(os.path.join(path, dir_name))
-    ]
-
-    if missing_dirs:
-        raise HTTPException(
-            status_code=404,
-            detail=f"The required directories are missing: {', '.join(missing_dirs)}.",
-        )
-
     if not storage_id:
-        raise BadRequestException(detail="storage parameter is missing.")
+        raise BadRequestException(detail="'storage' parameter is missing.")
+
+    if not os.path.exists(path):
+        raise NotFoundException(detail="The provided dataset path does not exist.")
+
+    datasets = [
+        dataset_path
+        for dataset in os.listdir(path)
+        if (dataset_path := os.path.join(path, dataset))
+        and is_dataset_structured(dataset_path)
+    ]
 
     logger.info(f"Parse headers from request: {request.headers}")
     public_key, signature = parse_authorization_header(request.headers)
