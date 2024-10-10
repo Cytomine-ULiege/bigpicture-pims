@@ -11,6 +11,7 @@
 #  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #  * See the License for the specific language governing permissions and
 #  * limitations under the License.
+
 import logging
 import os
 import shutil
@@ -18,7 +19,7 @@ from typing import List, Optional, Tuple
 
 from celery import group, signature
 from celery.result import allow_join_result
-from cytomine.models import UploadedFile
+from cytomine.models import ProjectCollection, UploadedFile
 
 from pims.api.exceptions import (
     BadRequestException,
@@ -524,8 +525,7 @@ class FileImporter:
                 name = self.pending_file.name
             self.upload_path = self.upload_dir / name
 
-            if self.pending_file.is_extracted():
-                self.mksymlink(self.pending_file, self.upload_path)
+            self.mksymlink(self.upload_path, self.pending_file)
 
             self.notify(
                 ImportEventType.MOVED_PENDING_FILE,
@@ -633,7 +633,12 @@ class DatasetImporter:
 
             listeners = [
                 StdoutListener(item.name),
-                CytomineListener(self.cytomine_auth, uf, user_properties=iter([])),
+                CytomineListener(
+                    self.cytomine_auth,
+                    uf,
+                    projects=ProjectCollection(),
+                    user_properties=iter([]),
+                ),
             ]
 
             fi = FileImporter(Path(image_path), item.name, listeners)
