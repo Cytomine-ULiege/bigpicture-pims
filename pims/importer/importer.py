@@ -590,64 +590,11 @@ class FileImporter:
             raise e
 
 
-class DatasetImporter:
-    """Class that imports all the images from a directory."""
-
-    def __init__(
-        self,
-        dataset_path: str,
-        cytomine_auth: Tuple[str, str, str],
-        storage_id: int,
-        image_server_id: int,
-        user_id: int,
-        prefer_copy: bool = False,
-    ) -> None:
-        self.dataset_path = dataset_path
-        self.cytomine_auth = cytomine_auth
-        self.storage_id = storage_id
-        self.image_server_id = image_server_id
-        self.user_id = user_id
-        self.prefer_copy = prefer_copy
-
-    def import_dataset(self) -> None:
-        """Import all the images from a dataset"""
-
-        images_path = Path(os.path.join(self.dataset_path, "images"))
-        for item in images_path.iterdir():
-            if not item.is_dir():
-                continue
-
-            image_path = os.path.join(images_path, item)
-
-            uf = UploadedFile(
-                original_filename=item.name,
-                filename=image_path,
-                size=get_folder_size(image_path),
-                ext="",
-                content_type="",
-                id_storage=self.storage_id,
-                id_user=self.user_id,
-                id_image_server=self.image_server_id,
-                status=UploadedFile.UPLOADED,
-            )
-
-            listeners = [
-                StdoutListener(item.name),
-                CytomineListener(
-                    self.cytomine_auth,
-                    uf,
-                    projects=ProjectCollection(),
-                    user_properties=iter([]),
-                ),
-            ]
-
-            fi = FileImporter(Path(image_path), item.name, listeners)
-            fi.import_from_path()
-
-
 def run_import(
-    filepath: str, name: str, extra_listeners: Optional[List[ImportListener]] = None,
-    prefer_copy: bool = False
+    filepath: str,
+    name: str,
+    extra_listeners: Optional[List[ImportListener]] = None,
+    prefer_copy: bool = False,
 ):
     pending_file = Path(filepath)
 
@@ -662,26 +609,6 @@ def run_import(
     fi.run(prefer_copy)
 
 
-def run_import_from_path(
-    dataset_path: str,
-    cytomine_auth: Tuple[str, str, str],
-    storage_id: int,
-    image_server_id: int,
-    user_id: int,
-    prefer_copy: bool = False,
-) -> None:
-    """Run importer from a given path."""
-
-    DatasetImporter(
-        dataset_path,
-        cytomine_auth,
-        storage_id,
-        image_server_id,
-        user_id,
-        prefer_copy=prefer_copy
-    ).import_dataset()
-
-
 def get_folder_size(folder_path) -> int:
     """Get the total size in bytes of a folder."""
     total_size = 0
@@ -691,3 +618,45 @@ def get_folder_size(folder_path) -> int:
             total_size += os.path.getsize(file_path)
 
     return total_size
+
+
+def run_import_from_path(
+    dataset_path: str,
+    cytomine_auth: Tuple[str, str, str],
+    storage_id: int,
+    image_server_id: int,
+    user_id: int,
+) -> None:
+    """Run importer from a given path."""
+
+    images_path = Path(os.path.join(dataset_path, "images"))
+    for item in images_path.iterdir():
+        if not item.is_dir():
+            continue
+
+        image_path = os.path.join(images_path, item)
+
+        uf = UploadedFile(
+            original_filename=item.name,
+            filename=image_path,
+            size=get_folder_size(image_path),
+            ext="",
+            content_type="",
+            id_storage=storage_id,
+            id_user=user_id,
+            id_image_server=image_server_id,
+            status=UploadedFile.UPLOADED,
+        )
+
+        listeners = [
+            StdoutListener(item.name),
+            CytomineListener(
+                cytomine_auth,
+                uf,
+                projects=ProjectCollection(),
+                user_properties=iter([]),
+            ),
+        ]
+
+        fi = FileImporter(Path(image_path), item.name, listeners)
+        fi.import_from_path()
