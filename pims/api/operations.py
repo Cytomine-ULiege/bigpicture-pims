@@ -19,16 +19,8 @@ from typing import Optional
 
 import aiofiles
 from cytomine import Cytomine
-from cytomine.models import (
-    AbstractImage,
-    AbstractSlice,
-    AbstractSliceCollection,
-    Project,
-    ProjectCollection,
-    Storage,
-    UploadedFile,
-)
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from cytomine.models import Project, ProjectCollection, Storage, UploadedFile
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from starlette.formparsers import (
     MultiPartMessage,
     MultiPartParser,
@@ -59,15 +51,11 @@ from pims.api.utils.response import serialize_cytomine_model
 from pims.config import Settings, get_settings
 from pims.files.archive import make_zip_archive
 from pims.files.file import Path
-from pims.files.image import Image
-from pims.formats.utils.factories import ImportableFormatFactory
 from pims.importer.importer import run_import, run_import_from_path
 from pims.importer.listeners import CytomineListener
 from pims.tasks.queue import Task, send_task
-from pims.utils.dtypes import dtype_to_bits
 from pims.utils.iterables import ensure_list
 from pims.utils.strings import unique_name_generator
-from pims.utils.types import parse_int
 
 try:
     import multipart
@@ -81,19 +69,9 @@ router = APIRouter()
 cytomine_logger = logging.getLogger("pims.cytomine")
 logger = logging.getLogger("pims")
 
-REQUIRED_DIRECTORIES = ["metadata", "images"]
+REQUIRED_DIRECTORIES = ["images", "metadata"]
 WRITING_PATH = get_settings().writing_path
 
-
-def get_folder_size(folder_path):
-    """Get the total size in bytes of a folder."""
-    total_size = 0
-    for dirpath, _, filenames in os.walk(folder_path):
-        for file in filenames:
-            file_path = os.path.join(dirpath, file)
-            total_size += os.path.getsize(file_path)
-
-    return total_size
 
 def is_dataset_structured(dataset_path: str) -> bool:
     """Check the structure of a dataset."""
@@ -156,7 +134,13 @@ def import_dataset(
             raise CytomineProblem(f"Storage {storage_id} not found")
 
     for dataset in datasets:
-        run_import_from_path(dataset, extra_listeners=[])
+        run_import_from_path(
+            dataset,
+            cytomine_auth,
+            storage_id,
+            this.id,
+            user.id,
+        )
 
     return JSONResponse(content={"status": "ok"})
 

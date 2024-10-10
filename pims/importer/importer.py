@@ -14,43 +14,54 @@
 import logging
 import os
 import shutil
-from typing import List, Optional
-import aiofiles
+from typing import List, Optional, Tuple
 
 from celery import group, signature
 from celery.result import allow_join_result
-from fastapi import Request, UploadFile  # noqa
+from cytomine.models import UploadedFile
 
 from pims.api.exceptions import (
-    BadRequestException, FilepathNotFoundProblem,
-    NoMatchingFormatProblem
+    BadRequestException,
+    FilepathNotFoundProblem,
+    NoMatchingFormatProblem,
 )
 from pims.api.utils.models import HistogramType
 from pims.config import get_settings
 from pims.files.archive import Archive, ArchiveError
 from pims.files.file import (
-    EXTRACTED_DIR, HISTOGRAM_STEM, ORIGINAL_STEM, PROCESSED_DIR, Path,
-    SPATIAL_STEM, UPLOAD_DIR_PREFIX
+    EXTRACTED_DIR,
+    HISTOGRAM_STEM,
+    ORIGINAL_STEM,
+    PROCESSED_DIR,
+    SPATIAL_STEM,
+    UPLOAD_DIR_PREFIX,
+    Path,
 )
 from pims.files.histogram import Histogram
 from pims.files.image import Image
 from pims.formats import AbstractFormat
 from pims.formats.utils.factories import (
     ImportableFormatFactory,
-    SpatialReadableFormatFactory
+    SpatialReadableFormatFactory,
 )
 from pims.importer.listeners import (
-    CytomineListener, ImportEventType, ImportListener,
-    StdoutListener
+    CytomineListener,
+    ImportEventType,
+    ImportListener,
+    StdoutListener,
 )
 from pims.processing.histograms.utils import build_histogram_file
-from pims.tasks.queue import BG_TASK_MAPPING, CELERY_TASK_MAPPING, Task, func_from_str
+from pims.tasks.queue import (
+    BG_TASK_MAPPING,
+    CELERY_TASK_MAPPING,
+    Task,
+    func_from_str,
+)
 from pims.utils.strings import unique_name_generator
 
 log = logging.getLogger("pims.app")
 
 FILE_ROOT_PATH = Path(get_settings().root)
-FILESYSTEM_PATH = Path(get_settings().writable_fs)
 PENDING_PATH = Path(get_settings().pending_path)
 WRITING_PATH = Path(get_settings().writing_path)
 
@@ -504,7 +515,7 @@ class FileImporter:
                 f"{UPLOAD_DIR_PREFIX}"
                 f"{str(unique_name_generator())}"
             )
-            self.upload_dir = FILESYSTEM_PATH / upload_dir_name
+            self.upload_dir = FILE_ROOT_PATH / upload_dir_name
             self.mkdir(self.upload_dir)
 
             if self.pending_name:
@@ -587,11 +598,17 @@ class DatasetImporter:
     def __init__(
         self,
         dataset_path: str,
-        extra_listeners: Optional[List[ImportListener]] = None,
+        cytomine_auth: Tuple[str, str, str],
+        storage_id: int,
+        image_server_id: int,
+        user_id: int,
         prefer_copy: bool = False,
     ) -> None:
         self.dataset_path = dataset_path
-        self.extra_listeners = extra_listeners
+        self.cytomine_auth = cytomine_auth
+        self.storage_id = storage_id
+        self.image_server_id = image_server_id
+        self.user_id = user_id
         self.prefer_copy = prefer_copy
 
     def import_dataset(self) -> None:
@@ -602,10 +619,26 @@ class DatasetImporter:
             if not item.is_dir():
                 continue
 
-            listeners = [StdoutListener(item.name)] + self.extra_listeners
-            image_path = Path(os.path.join(images_path, item))
+            image_path = os.path.join(images_path, item)
 
-            fi = FileImporter(image_path, item.name, listeners)
+            uf = UploadedFile(
+                original_filename=item.name,
+                filename=image_path,
+                size=get_folder_size(image_path),
+                ext="",
+                content_type="",
+                id_storage=self.storage_id,
+                id_user=self.user_id,
+                id_image_server=self.image_server_id,
+                status=UploadedFile.UPLOADED,
+            )
+
+            listeners = [
+                StdoutListener(item.name),
+                CytomineListener(self.cytomine_auth, uf, user_properties=iter([])),
+            ]
+
+            fi = FileImporter(Path(image_path), item.name, listeners)
             fi.import_from_path()
 
 
@@ -628,9 +661,30 @@ def run_import(
 
 def run_import_from_path(
     dataset_path: str,
-    extra_listeners: Optional[List[ImportListener]] = None,
+    cytomine_auth: Tuple[str, str, str],
+    storage_id: int,
+    image_server_id: int,
+    user_id: int,
     prefer_copy: bool = False,
 ) -> None:
     """Run importer from a given path."""
 
-    DatasetImporter(dataset_path, extra_listeners, prefer_copy).import_dataset()
+    DatasetImporter(
+        dataset_path,
+        cytomine_auth,
+        storage_id,
+        image_server_id,
+        user_id,
+        prefer_copy=prefer_copy
+    ).import_dataset()
+
+
+def get_folder_size(folder_path) -> int:
+    """Get the total size in bytes of a folder."""
+    total_size = 0
+    for dirpath, _, filenames in os.walk(folder_path):
+        for file in filenames:
+            file_path = os.path.join(dirpath, file)
+            total_size += os.path.getsize(file_path)
+
+    return total_size
