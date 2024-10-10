@@ -505,7 +505,7 @@ class FileImporter:
 
         return imported
     
-    def import_from_path(self, prefer_copy: bool = False):
+    def import_from_path(self):
         """Import a file from a given path."""
 
         try:
@@ -524,9 +524,7 @@ class FileImporter:
                 name = self.pending_file.name
             self.upload_path = self.upload_dir / name
 
-            self.move(self.pending_file, self.upload_path, prefer_copy)
-
-            if not prefer_copy and self.pending_file.is_extracted():
+            if self.pending_file.is_extracted():
                 self.mksymlink(self.pending_file, self.upload_path)
 
             self.notify(
