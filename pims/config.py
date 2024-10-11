@@ -57,6 +57,9 @@ class ReadableSettings(BaseSettings):
 
 
 class Settings(ReadableSettings):
+    crypt4gh_public_key: str
+    crypt4gh_private_key: str
+
     cytomine_public_key: str
     cytomine_private_key: str
 

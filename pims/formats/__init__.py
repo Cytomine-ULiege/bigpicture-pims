@@ -119,6 +119,7 @@ def _find_formats_in_module(mod: ModuleType) -> List[Type[AbstractFormat]]:
     formats: list
         The format classes
     """
+    settings = get_settings()
     formats = list()
     for _, name, _ in iter_modules(mod.__path__):
         submodule_name = f"{mod.__name__}.{name}"
@@ -131,6 +132,15 @@ def _find_formats_in_module(mod: ModuleType) -> List[Type[AbstractFormat]]:
                     and "Abstract" not in var.__name__
                 ):
                     format = var
+                    for attribute in ['parser_class', 'reader_class']:
+                        component = getattr(format, attribute)
+
+                        if hasattr(component, "set_credentials"):
+                            component.set_credentials({
+                                "public_key": settings.crypt4gh_public_key,
+                                "private_key": settings.crypt4gh_private_key,
+                            })
+
                     formats.append(format)
                     format.init()
 
