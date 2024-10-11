@@ -6,9 +6,9 @@ ARG OPENJPEG_VERSION=2.4.0
 ARG PIMS_REVISION
 ARG PIMS_VERSION
 ARG PLUGIN_CSV=scripts/plugin-list.csv
-ARG PY_VERSION=3.8
+ARG PY_VERSION=3.10
 ARG SETUPTOOLS_VERSION=59.6.0
-ARG UBUNTU_VERSION=20.04
+ARG UBUNTU_VERSION=22.04
 ARG VIPS_URL=https://github.com/libvips/libvips/releases/download
 ARG VIPS_VERSION=8.12.1
 
@@ -23,7 +23,7 @@ FROM ubuntu:${UBUNTU_VERSION}
 ENV LANG C.UTF-8
 ENV DEBIAN_FRONTEND noninteractive
 
-ARG PY_VERSION=3.8
+ARG PY_VERSION=3.10
 
 RUN apt-get -y update && apt-get -y install --no-install-recommends --no-install-suggests \
         `# Essentials` \
@@ -167,7 +167,7 @@ ARG PIMS_PACKAGE_REVISION
 ARG PIMS_PACKAGE_VERSION
 ARG PIMS_VERSION
 ARG PLUGIN_CSV=scripts/plugin-list.csv
-ARG PY_VERSION=3.8
+ARG PY_VERSION=3.10
 ARG SETUPTOOLS_VERSION=59.6.0
 ARG UBUNTU_VERSION=20.04
 ARG VIPS_URL=https://github.com/libvips/libvips/releases/download
