@@ -19,6 +19,7 @@ from abc import ABC
 from typing import Any, Dict, List, Optional, TYPE_CHECKING, Type
 
 from pims.cache import SimpleDataCache, cached_property
+from pims.config import get_settings
 from pims.formats.utils.checker import AbstractChecker
 from pims.formats.utils.convertor import AbstractConvertor
 from pims.formats.utils.histogram import AbstractHistogramReader
@@ -88,6 +89,17 @@ class AbstractFormat(ABC, SimpleDataCache):
         self.convertor = self.convertor_class(self) if self.convertor_class else None
 
         self.histogram_reader = self.histogram_reader_class(self)
+
+        settings = get_settings()
+        credentials = {
+            "public_key": settings.crypt4gh_public_key,
+            "private_key": settings.crypt4gh_private_key,
+        }
+
+        for component in (self.parser, self.reader):
+            if hasattr(component, "set_credentials"):
+                component.set_credentials(credentials)
+
 
     @classmethod
     def init(cls):
