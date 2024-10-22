@@ -196,6 +196,13 @@ class AbstractFormat(ABC, SimpleDataCache):
             Whether it is this format
         """
         if cls.checker_class:
+            if hasattr(cls.checker_class, "CREDENTIALS"):
+                settings = get_settings()
+                cls.checker_class.CREDENTIALS = {
+                    "public_key": settings.crypt4gh_public_key,
+                    "private_key": settings.crypt4gh_private_key,
+                }
+
             return cls.checker_class.match(cached_path)
         return False
 
