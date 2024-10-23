@@ -59,6 +59,8 @@ cligj==0.7.2
     # via rasterio
 contourpy==1.0.7
     # via matplotlib
+cryptography==43.0.1
+    # via cytomine-pims (setup.py)
 cycler==0.11.0
     # via matplotlib
 cytomine-python-client==2.9.0
@@ -154,7 +156,7 @@ pydantic==1.10.5
     # via
     #   cytomine-pims (setup.py)
     #   fastapi
-pydicom==2.3.1
+pydicom==3.0.1
     # via cytomine-pims (setup.py)
 pygments==2.14.0
     # via rich
