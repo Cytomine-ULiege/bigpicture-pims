@@ -127,9 +127,6 @@ RUN python plugins.py \
 # Cleaning. Cannot be done before as plugin prerequisites could use apt-get.
 RUN rm -rf /var/lib/apt/lists/*
 
-COPY ./crypt4gh_fsspec-0.1.0-py3-none-any.whl /app/crypt4gh_fsspec-0.1.0-py3-none-any.whl
-RUN pip install --no-cache-dir /app/crypt4gh_fsspec-0.1.0-py3-none-any.whl
-
 # Install python requirements
 ARG GUNICORN_VERSION=20.1.0
 ARG SETUPTOOLS_VERSION=59.6.0
