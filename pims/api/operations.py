@@ -67,7 +67,6 @@ except ModuleNotFoundError:  # pragma: nocover
 router = APIRouter()
 
 cytomine_logger = logging.getLogger("pims.cytomine")
-logger = logging.getLogger("pims")
 
 REQUIRED_DIRECTORIES = ["images", "metadata"]
 WRITING_PATH = get_settings().writing_path
@@ -108,12 +107,10 @@ def import_dataset(
         and is_dataset_structured(dataset_path)
     ]
 
-    logger.info(f"Parse headers from request: {request.headers}")
     public_key, signature = parse_authorization_header(request.headers)
     cytomine_auth = (host, config.cytomine_public_key, config.cytomine_private_key)
 
     with Cytomine(*cytomine_auth, configure_logging=False) as c:
-        logger.info(f"Logged as {c}")
         if not c.current_user:
             raise AuthenticationException("PIMS authentication to Cytomine failed.")
 
@@ -121,14 +118,12 @@ def import_dataset(
         cyto_keys = c.get(f"userkey/{public_key}/keys.json")
         private_key = cyto_keys["privateKey"]
 
-        logger.info(f"SIG {sign_token(private_key, parse_request_token(request))} == {signature}")
         if sign_token(private_key, parse_request_token(request)) != signature:
             raise AuthenticationException("Authentication to Cytomine failed")
 
         c.set_credentials(public_key, private_key)
         user = c.current_user
 
-        logger.info(f"Get storage {storage_id}")
         storage = Storage().fetch(storage_id)
         if not storage:
             raise CytomineProblem(f"Storage {storage_id} not found")
