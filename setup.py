@@ -34,6 +34,7 @@ REQUIRES_PYTHON = '>=3.8.0'
 
 # What packages are required for this module to be executed?
 REQUIRED = [
+    'cryptography==43.0.1',
     'uvicorn[standard]>=0.13.4',
     'asgiref>=3.4.1',
     'fastapi>=0.65.1,<=0.68.2',
@@ -56,7 +57,7 @@ REQUIRED = [
     'imagecodecs>=2021.3.31',
     'scikit-image>=0.18',
     'zarr>=2.8.3',
-    'pydicom>=2.2.2',
+    'pydicom>=3.0.0',
     'python-gdcm>=3.0.10',
     'python-dateutil>=2.7.0',
 
