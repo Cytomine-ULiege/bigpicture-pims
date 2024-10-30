@@ -15,12 +15,19 @@
 import logging
 import os
 import shutil
+from tempfile import TemporaryDirectory
 from typing import List, Optional, Tuple
 
+from bigpicture_metadata_interface import BPInterface
 from celery import group, signature
 from celery.result import allow_join_result
-from cytomine.models import ProjectCollection, UploadedFile
-
+from crypt4gh_fsspec import Crypt4GHFileSystem
+from cytomine.models import (
+    AbstractImage,
+    ProjectCollection,
+    PropertyCollection,
+    UploadedFile,
+)
 from pims.api.exceptions import (
     BadRequestException,
     FilepathNotFoundProblem,
@@ -51,6 +58,7 @@ from pims.importer.listeners import (
     ImportListener,
     StdoutListener,
 )
+from pims.processing.metadata import BPMetadataParser
 from pims.processing.histograms.utils import build_histogram_file
 from pims.tasks.queue import (
     BG_TASK_MAPPING,
@@ -505,8 +513,8 @@ class FileImporter:
                 _sequential_imports()
 
         return imported
-    
-    def import_from_path(self):
+
+    def import_from_path(self) -> Path:
         """Import a file from a given path."""
 
         try:
@@ -580,7 +588,7 @@ class FileImporter:
                 self.upload_path,
                 self.original,
             )
-            return [self.upload_path]
+            return self.upload_path
         except Exception as e:
             self.notify(
                 ImportEventType.FILE_ERROR,
@@ -626,9 +634,10 @@ def run_import_from_path(
     storage_id: int,
     image_server_id: int,
     user_id: int,
-) -> None:
+) -> List[UploadedFile]:
     """Run importer from a given path."""
 
+    uploaded_files = []
     images_path = Path(os.path.join(dataset_path, "images"))
     for item in images_path.iterdir():
         if not item.is_dir():
@@ -660,3 +669,59 @@ def run_import_from_path(
 
         fi = FileImporter(Path(image_path), item.name, listeners)
         fi.import_from_path()
+
+        uploaded_files.append(uf)
+
+    return uploaded_files
+
+
+def import_metadata(metadata_path: str, uploaded_files: List[UploadedFile]) -> None:
+    """Import metadata from a given path."""
+
+    abstract_images = []
+    for uf in uploaded_files:
+        abstract_images.append(
+            AbstractImage(
+                filename=uf.original_filename,
+                id_uploaded_file=uf.id
+            ).fetch()
+        )
+
+    files = [
+        file
+        for file in os.listdir(metadata_path)
+        if os.path.isfile(os.path.join(metadata_path, file))
+    ]
+    settings = get_settings()
+    fs = Crypt4GHFileSystem(
+        settings.crypt4gh_private_key,
+        settings.crypt4gh_public_key,
+    )
+
+    with TemporaryDirectory() as tmp_dir:
+        # Decrypt metadata file
+        for file in files:
+            with fs.open(os.path.join(metadata_path, file), "rb") as fp:
+                decrypted_data = fp.read()
+
+            with open(os.path.join(tmp_dir, file), "wb") as fp:
+                fp.write(decrypted_data)
+
+        # Parse metadata file
+        studies, beings, datasets = BPInterface.parse_xml_files(tmp_dir)
+
+    metadata_parser = BPMetadataParser(studies, beings, datasets)
+
+    # Upload metadata file
+    for ai in abstract_images:
+        metadata = metadata_parser.parse({"image": ai.originalFilename})
+
+        properties = PropertyCollection(ai)
+        for key, value in metadata.items():
+            properties.append(
+                ai,
+                f"MSMDAD.{key}",
+                value,
+            )
+
+        properties.save()
