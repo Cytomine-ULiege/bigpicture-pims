@@ -129,7 +129,7 @@ def import_dataset(
             raise CytomineProblem(f"Storage {storage_id} not found")
 
     for dataset in datasets:
-        run_import_from_path(
+        uploaded_files = run_import_from_path(
             dataset,
             cytomine_auth,
             storage_id,
@@ -137,7 +137,7 @@ def import_dataset(
             user.id,
         )
 
-        import_metadata(os.path.join(dataset, "metadata"), cytomine_auth)
+        import_metadata(os.path.join(dataset, "metadata"), uploaded_files)
 
     return JSONResponse(content={"status": "ok"})
 
