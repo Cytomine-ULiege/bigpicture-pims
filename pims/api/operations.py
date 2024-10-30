@@ -51,7 +51,7 @@ from pims.api.utils.response import serialize_cytomine_model
 from pims.config import Settings, get_settings
 from pims.files.archive import make_zip_archive
 from pims.files.file import Path
-from pims.importer.importer import run_import, run_import_from_path
+from pims.importer.importer import import_metadata, run_import, run_import_from_path
 from pims.importer.listeners import CytomineListener
 from pims.tasks.queue import Task, send_task
 from pims.utils.iterables import ensure_list
@@ -136,6 +136,8 @@ def import_dataset(
             this.id,
             user.id,
         )
+
+        import_metadata(os.path.join(dataset, "metadata"), cytomine_auth)
 
     return JSONResponse(content={"status": "ok"})
 

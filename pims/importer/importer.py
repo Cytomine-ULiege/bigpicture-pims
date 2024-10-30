@@ -15,10 +15,12 @@
 import logging
 import os
 import shutil
+from tempfile import TemporaryDirectory
 from typing import List, Optional, Tuple
 
 from celery import group, signature
 from celery.result import allow_join_result
+from crypt4gh_fsspec import Crypt4GHFileSystem
 from cytomine.models import ProjectCollection, UploadedFile
 
 from pims.api.exceptions import (
@@ -660,3 +662,31 @@ def run_import_from_path(
 
         fi = FileImporter(Path(image_path), item.name, listeners)
         fi.import_from_path()
+
+
+def import_metadata(metadata_path: str, cytomine_auth: Tuple[str, str, str]) -> None:
+    """Import metadata from a given path."""
+
+    files = [
+        file
+        for file in os.listdir(metadata_path)
+        if os.path.isfile(os.path.join(metadata_path, file))
+    ]
+    settings = get_settings()
+    fs = Crypt4GHFileSystem(
+        settings.crypt4gh_private_key,
+        settings.crypt4gh_public_key,
+    )
+
+    with TemporaryDirectory() as tmp_dir:
+        for file in files:
+            # Decrypt metadata file
+            with fs.open(os.path.join(metadata_path, file), "rb") as fp:
+                decrypted_data = fp.read()
+
+            with open(os.path.join(tmp_dir, file), "wb") as fp:
+                fp.write(decrypted_data)
+
+            # Parse metadata file
+
+            # Upload metadata file
