@@ -15,6 +15,7 @@
 import logging
 import os
 import shutil
+from base64 import b64decode
 from tempfile import TemporaryDirectory
 from typing import List, Optional, Tuple
 
@@ -22,12 +23,16 @@ from bigpicture_metadata_interface import BPInterface
 from celery import group, signature
 from celery.result import allow_join_result
 from crypt4gh_fsspec import Crypt4GHFileSystem
+from cytomine.cytomine import Cytomine
 from cytomine.models import (
     AbstractImage,
     ProjectCollection,
     PropertyCollection,
     UploadedFile,
 )
+from nacl.public import PrivateKey
+from nacl.secret import SecretBox
+
 from pims.api.exceptions import (
     BadRequestException,
     FilepathNotFoundProblem,
@@ -680,11 +685,9 @@ def import_metadata(metadata_path: str, uploaded_files: List[UploadedFile]) -> N
 
     abstract_images = []
     for uf in uploaded_files:
+        data = Cytomine.get_instance().get(f"uploadedfile/{uf.id}/abstractimage.json")
         abstract_images.append(
-            AbstractImage(
-                filename=uf.original_filename,
-                id_uploaded_file=uf.id
-            ).fetch()
+            AbstractImage().populate(data)
         )
 
     files = [
@@ -694,17 +697,19 @@ def import_metadata(metadata_path: str, uploaded_files: List[UploadedFile]) -> N
     ]
     settings = get_settings()
     fs = Crypt4GHFileSystem(
-        settings.crypt4gh_private_key,
-        settings.crypt4gh_public_key,
+        decode_key(settings.crypt4gh_private_key),
     )
 
     with TemporaryDirectory() as tmp_dir:
+        metadata_directory_path = os.path.join(tmp_dir, "METADATA")
+        os.makedirs(metadata_directory_path, exist_ok=True)
+
         # Decrypt metadata file
         for file in files:
             with fs.open(os.path.join(metadata_path, file), "rb") as fp:
                 decrypted_data = fp.read()
 
-            with open(os.path.join(tmp_dir, file), "wb") as fp:
+            with open(os.path.join(metadata_directory_path, file[:-5]), "wb") as fp:
                 fp.write(decrypted_data)
 
         # Parse metadata file
@@ -725,3 +730,16 @@ def import_metadata(metadata_path: str, uploaded_files: List[UploadedFile]) -> N
             )
 
         properties.save()
+
+
+def decode_key(key: str) -> PrivateKey:
+    """Decode the key and extract the private key."""
+
+    NACL_KEY_LENGTH = SecretBox.KEY_SIZE
+
+    secret_key = b64decode(key)[-NACL_KEY_LENGTH:]
+
+    if len(secret_key) != NACL_KEY_LENGTH:
+        raise ValueError(f"The extracted key is not {NACL_KEY_LENGTH} bytes long!")
+
+    return PrivateKey(secret_key)
