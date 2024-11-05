@@ -680,7 +680,7 @@ def run_import_from_path(
     return uploaded_files
 
 
-def import_metadata(metadata_path: str, uploaded_files: List[UploadedFile]) -> None:
+def import_metadata(metadata_path: str, uploaded_files: List[UploadedFile]) -> bool:
     """Import metadata from a given path."""
 
     abstract_images = []
@@ -704,7 +704,6 @@ def import_metadata(metadata_path: str, uploaded_files: List[UploadedFile]) -> N
         metadata_directory_path = os.path.join(tmp_dir, "METADATA")
         os.makedirs(metadata_directory_path, exist_ok=True)
 
-        # Decrypt metadata file
         for file in files:
             with fs.open(os.path.join(metadata_path, file), "rb") as fp:
                 decrypted_data = fp.read()
@@ -712,7 +711,9 @@ def import_metadata(metadata_path: str, uploaded_files: List[UploadedFile]) -> N
             with open(os.path.join(metadata_directory_path, file[:-5]), "wb") as fp:
                 fp.write(decrypted_data)
 
-        # Parse metadata file
+        if not BPInterface.validate(tmp_dir):
+            return False
+
         studies, beings, datasets = BPInterface.parse_xml_files(tmp_dir)
 
     metadata_parser = BPMetadataParser(studies, beings, datasets)
@@ -730,6 +731,8 @@ def import_metadata(metadata_path: str, uploaded_files: List[UploadedFile]) -> N
             )
 
         properties.save()
+
+    return True
 
 
 def decode_key(key: str) -> PrivateKey:

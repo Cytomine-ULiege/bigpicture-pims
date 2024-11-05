@@ -137,9 +137,14 @@ def import_dataset(
             user.id,
         )
 
-        import_metadata(os.path.join(dataset, "metadata"), uploaded_files)
+        success = import_metadata(os.path.join(dataset, "metadata"), uploaded_files)
 
-    return JSONResponse(content={"status": "ok"})
+    return JSONResponse(
+        content={
+            "image_upload": len(uploaded_files) != 0,
+            "metadata_upload": success,
+        }
+    )
 
 
 @router.post('/upload', tags=['Import'])
