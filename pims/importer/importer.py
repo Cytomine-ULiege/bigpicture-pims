@@ -680,7 +680,7 @@ def run_import_from_path(
     return uploaded_files
 
 
-def import_metadata(metadata_path: str, uploaded_files: List[UploadedFile]) -> bool:
+def import_metadata(dataset_path: str, uploaded_files: List[UploadedFile]) -> bool:
     """Import metadata from a given path."""
 
     abstract_images = []
@@ -690,6 +690,7 @@ def import_metadata(metadata_path: str, uploaded_files: List[UploadedFile]) -> b
             AbstractImage().populate(data)
         )
 
+    metadata_path = os.path.join(dataset_path, "metadata")
     files = [
         file
         for file in os.listdir(metadata_path)
@@ -701,7 +702,7 @@ def import_metadata(metadata_path: str, uploaded_files: List[UploadedFile]) -> b
     )
 
     with TemporaryDirectory() as tmp_dir:
-        metadata_directory_path = os.path.join(tmp_dir, "METADATA")
+        metadata_directory_path = os.path.join(tmp_dir, "metadata")
         os.makedirs(metadata_directory_path, exist_ok=True)
 
         for file in files:
@@ -710,6 +711,17 @@ def import_metadata(metadata_path: str, uploaded_files: List[UploadedFile]) -> b
 
             with open(os.path.join(metadata_directory_path, file[:-5]), "wb") as fp:
                 fp.write(decrypted_data)
+
+        with fs.open(
+            os.path.join(dataset_path, "private", "dac.xml.c4gh"),
+            "rb",
+        ) as fp:
+            decrypted_data = fp.read()
+
+        private_directory_path = os.path.join(tmp_dir, "metadata")
+        os.makedirs(private_directory_path, exist_ok=True)
+        with open(os.path.join(private_directory_path, "dac.xml"), "wb") as fp:
+            fp.write(decrypted_data)
 
         if not BPInterface.validate(tmp_dir):
             return False

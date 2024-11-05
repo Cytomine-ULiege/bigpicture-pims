@@ -137,7 +137,7 @@ def import_dataset(
             user.id,
         )
 
-        success = import_metadata(os.path.join(dataset, "metadata"), uploaded_files)
+        success = import_metadata(dataset, uploaded_files)
 
     return JSONResponse(
         content={
