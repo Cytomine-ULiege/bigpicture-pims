@@ -680,15 +680,8 @@ def run_import_from_path(
     return uploaded_files
 
 
-def import_metadata(dataset_path: str, uploaded_files: List[UploadedFile]) -> bool:
+def import_metadata(dataset_path: str, abstract_images: List[AbstractImage]) -> bool:
     """Import metadata from a given path."""
-
-    abstract_images = []
-    for uf in uploaded_files:
-        data = Cytomine.get_instance().get(f"uploadedfile/{uf.id}/abstractimage.json")
-        abstract_images.append(
-            AbstractImage().populate(data)
-        )
 
     metadata_path = os.path.join(dataset_path, "metadata")
     files = [

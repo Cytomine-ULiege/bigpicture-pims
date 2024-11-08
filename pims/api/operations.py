@@ -19,7 +19,14 @@ from typing import Optional
 
 import aiofiles
 from cytomine import Cytomine
-from cytomine.models import Project, ProjectCollection, Storage, UploadedFile
+from cytomine.models import (
+    AbstractImage,
+    ImageInstance,
+    Project,
+    ProjectCollection,
+    Storage,
+    UploadedFile,
+)
 from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from starlette.formparsers import (
     MultiPartMessage,
@@ -137,7 +144,19 @@ def import_dataset(
             user.id,
         )
 
-        success = import_metadata(dataset, uploaded_files)
+        abstract_images = []
+        for uf in uploaded_files:
+            data = Cytomine.get_instance().get(
+                f"uploadedfile/{uf.id}/abstractimage.json"
+            )
+            abstract_images.append(AbstractImage().populate(data))
+
+        success = import_metadata(dataset, abstract_images)
+
+        project = Project(name=os.path.basename(dataset)).save()
+
+        for image in abstract_images:
+            ImageInstance(id_abstract_image=image.id, id_project=project.id).save()
 
     return JSONResponse(
         content={
