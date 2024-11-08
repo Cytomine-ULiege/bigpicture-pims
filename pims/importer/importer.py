@@ -15,11 +15,23 @@
 import logging
 import os
 import shutil
+from base64 import b64decode
+from tempfile import TemporaryDirectory
 from typing import List, Optional, Tuple
 
+from bigpicture_metadata_interface import BPInterface
 from celery import group, signature
 from celery.result import allow_join_result
-from cytomine.models import ProjectCollection, UploadedFile
+from crypt4gh_fsspec import Crypt4GHFileSystem
+from cytomine.cytomine import Cytomine
+from cytomine.models import (
+    AbstractImage,
+    ProjectCollection,
+    PropertyCollection,
+    UploadedFile,
+)
+from nacl.public import PrivateKey
+from nacl.secret import SecretBox
 
 from pims.api.exceptions import (
     BadRequestException,
@@ -51,6 +63,7 @@ from pims.importer.listeners import (
     ImportListener,
     StdoutListener,
 )
+from pims.processing.metadata import BPMetadataParser
 from pims.processing.histograms.utils import build_histogram_file
 from pims.tasks.queue import (
     BG_TASK_MAPPING,
@@ -505,8 +518,8 @@ class FileImporter:
                 _sequential_imports()
 
         return imported
-    
-    def import_from_path(self):
+
+    def import_from_path(self) -> Path:
         """Import a file from a given path."""
 
         try:
@@ -580,7 +593,7 @@ class FileImporter:
                 self.upload_path,
                 self.original,
             )
-            return [self.upload_path]
+            return self.upload_path
         except Exception as e:
             self.notify(
                 ImportEventType.FILE_ERROR,
@@ -626,9 +639,10 @@ def run_import_from_path(
     storage_id: int,
     image_server_id: int,
     user_id: int,
-) -> None:
+) -> List[UploadedFile]:
     """Run importer from a given path."""
 
+    uploaded_files = []
     images_path = Path(os.path.join(dataset_path, "images"))
     for item in images_path.iterdir():
         if not item.is_dir():
@@ -660,3 +674,87 @@ def run_import_from_path(
 
         fi = FileImporter(Path(image_path), item.name, listeners)
         fi.import_from_path()
+
+        uploaded_files.append(uf)
+
+    return uploaded_files
+
+
+def import_metadata(dataset_path: str, uploaded_files: List[UploadedFile]) -> bool:
+    """Import metadata from a given path."""
+
+    abstract_images = []
+    for uf in uploaded_files:
+        data = Cytomine.get_instance().get(f"uploadedfile/{uf.id}/abstractimage.json")
+        abstract_images.append(
+            AbstractImage().populate(data)
+        )
+
+    metadata_path = os.path.join(dataset_path, "metadata")
+    files = [
+        file
+        for file in os.listdir(metadata_path)
+        if os.path.isfile(os.path.join(metadata_path, file))
+    ]
+    settings = get_settings()
+    fs = Crypt4GHFileSystem(
+        decode_key(settings.crypt4gh_private_key),
+    )
+
+    with TemporaryDirectory() as tmp_dir:
+        metadata_directory_path = os.path.join(tmp_dir, "metadata")
+        os.makedirs(metadata_directory_path, exist_ok=True)
+
+        for file in files:
+            with fs.open(os.path.join(metadata_path, file), "rb") as fp:
+                decrypted_data = fp.read()
+
+            with open(os.path.join(metadata_directory_path, file[:-5]), "wb") as fp:
+                fp.write(decrypted_data)
+
+        with fs.open(
+            os.path.join(dataset_path, "private", "dac.xml.c4gh"),
+            "rb",
+        ) as fp:
+            decrypted_data = fp.read()
+
+        private_directory_path = os.path.join(tmp_dir, "metadata")
+        os.makedirs(private_directory_path, exist_ok=True)
+        with open(os.path.join(private_directory_path, "dac.xml"), "wb") as fp:
+            fp.write(decrypted_data)
+
+        if not BPInterface.validate(tmp_dir):
+            return False
+
+        studies, beings, datasets = BPInterface.parse_xml_files(tmp_dir)
+
+    metadata_parser = BPMetadataParser(studies, beings, datasets)
+
+    # Upload metadata file
+    for ai in abstract_images:
+        metadata = metadata_parser.parse({"image": ai.originalFilename})
+
+        properties = PropertyCollection(ai)
+        for key, value in metadata.items():
+            properties.append(
+                ai,
+                f"MSMDAD.{key}",
+                value,
+            )
+
+        properties.save()
+
+    return True
+
+
+def decode_key(key: str) -> PrivateKey:
+    """Decode the key and extract the private key."""
+
+    NACL_KEY_LENGTH = SecretBox.KEY_SIZE
+
+    secret_key = b64decode(key)[-NACL_KEY_LENGTH:]
+
+    if len(secret_key) != NACL_KEY_LENGTH:
+        raise ValueError(f"The extracted key is not {NACL_KEY_LENGTH} bytes long!")
+
+    return PrivateKey(secret_key)

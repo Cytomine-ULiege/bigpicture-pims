@@ -51,7 +51,7 @@ from pims.api.utils.response import serialize_cytomine_model
 from pims.config import Settings, get_settings
 from pims.files.archive import make_zip_archive
 from pims.files.file import Path
-from pims.importer.importer import run_import, run_import_from_path
+from pims.importer.importer import import_metadata, run_import, run_import_from_path
 from pims.importer.listeners import CytomineListener
 from pims.tasks.queue import Task, send_task
 from pims.utils.iterables import ensure_list
@@ -129,7 +129,7 @@ def import_dataset(
             raise CytomineProblem(f"Storage {storage_id} not found")
 
     for dataset in datasets:
-        run_import_from_path(
+        uploaded_files = run_import_from_path(
             dataset,
             cytomine_auth,
             storage_id,
@@ -137,7 +137,14 @@ def import_dataset(
             user.id,
         )
 
-    return JSONResponse(content={"status": "ok"})
+        success = import_metadata(dataset, uploaded_files)
+
+    return JSONResponse(
+        content={
+            "image_upload": len(uploaded_files) != 0,
+            "metadata_upload": success,
+        }
+    )
 
 
 @router.post('/upload', tags=['Import'])
