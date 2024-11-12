@@ -127,6 +127,12 @@ RUN python plugins.py \
 # Cleaning. Cannot be done before as plugin prerequisites could use apt-get.
 RUN rm -rf /var/lib/apt/lists/*
 
+# Install private dependencies
+ARG BMI
+ARG CF
+
+RUN pip install --no-cache-dir ${CF} ${BMI}
+
 # Install python requirements
 ARG GUNICORN_VERSION=20.1.0
 ARG SETUPTOOLS_VERSION=59.6.0
