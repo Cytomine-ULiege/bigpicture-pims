@@ -42,6 +42,8 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           build-args: |
+            BMI=${{ secrets.BMI }}
+            CF=${{ secrets.CF }}
             ENTRYPOINT_SCRIPTS_VERSION=${{ vars.ENTRYPOINT_SCRIPTS_VERSION }}
             GUNICORN_VERSION=${{ vars.GUNICORN_VERSION }}
             OPENJPEG_URL=${{ vars.OPENJPEG_URL }}
