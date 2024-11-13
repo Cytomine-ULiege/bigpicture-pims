@@ -42,7 +42,7 @@ SPATIAL_STEM = "visualisation"
 SPECTRAL_STEM = "spectral"
 HISTOGRAM_STEM = "histogram"
 
-_NUM_SIGNATURE_BYTES = 262
+NUM_SIGNATURE_BYTES = 262
 
 
 class FileRole(str, Enum):
@@ -367,7 +367,7 @@ class Path(PlatformPath, _Path, SafelyCopiable):
         if not self.is_file():
             return bytearray()
         with self.resolve().open('rb') as fp:
-            return bytearray(fp.read(_NUM_SIGNATURE_BYTES))
+            return bytearray(fp.read(NUM_SIGNATURE_BYTES))
 
     @property
     def path(self) -> Path:

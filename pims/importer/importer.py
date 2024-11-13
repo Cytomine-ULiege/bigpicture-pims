@@ -11,47 +11,73 @@
 #  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #  * See the License for the specific language governing permissions and
 #  * limitations under the License.
+
 import logging
 import os
 import shutil
-from typing import List, Optional
-import aiofiles
+from base64 import b64decode
+from tempfile import TemporaryDirectory
+from typing import List, Optional, Tuple
 
+from bigpicture_metadata_interface import BPInterface
 from celery import group, signature
 from celery.result import allow_join_result
-from fastapi import Request, UploadFile  # noqa
+from crypt4gh_fsspec import Crypt4GHFileSystem
+from cytomine.cytomine import Cytomine
+from cytomine.models import (
+    AbstractImage,
+    ProjectCollection,
+    PropertyCollection,
+    UploadedFile,
+)
+from nacl.public import PrivateKey
+from nacl.secret import SecretBox
 
 from pims.api.exceptions import (
-    BadRequestException, FilepathNotFoundProblem,
-    NoMatchingFormatProblem
+    BadRequestException,
+    FilepathNotFoundProblem,
+    NoMatchingFormatProblem,
 )
 from pims.api.utils.models import HistogramType
 from pims.config import get_settings
 from pims.files.archive import Archive, ArchiveError
 from pims.files.file import (
-    EXTRACTED_DIR, HISTOGRAM_STEM, ORIGINAL_STEM, PROCESSED_DIR, Path,
-    SPATIAL_STEM, UPLOAD_DIR_PREFIX
+    EXTRACTED_DIR,
+    HISTOGRAM_STEM,
+    ORIGINAL_STEM,
+    PROCESSED_DIR,
+    SPATIAL_STEM,
+    UPLOAD_DIR_PREFIX,
+    Path,
 )
 from pims.files.histogram import Histogram
 from pims.files.image import Image
 from pims.formats import AbstractFormat
 from pims.formats.utils.factories import (
     ImportableFormatFactory,
-    SpatialReadableFormatFactory
+    SpatialReadableFormatFactory,
 )
 from pims.importer.listeners import (
-    CytomineListener, ImportEventType, ImportListener,
-    StdoutListener
+    CytomineListener,
+    ImportEventType,
+    ImportListener,
+    StdoutListener,
 )
+from pims.processing.metadata import BPMetadataParser
 from pims.processing.histograms.utils import build_histogram_file
-from pims.tasks.queue import BG_TASK_MAPPING, CELERY_TASK_MAPPING, Task, func_from_str
+from pims.tasks.queue import (
+    BG_TASK_MAPPING,
+    CELERY_TASK_MAPPING,
+    Task,
+    func_from_str,
+)
 from pims.utils.strings import unique_name_generator
 
 log = logging.getLogger("pims.app")
 
+FILE_ROOT_PATH = Path(get_settings().root)
 PENDING_PATH = Path(get_settings().pending_path)
 WRITING_PATH = Path(get_settings().writing_path)
-FILE_ROOT_PATH = Path(get_settings().root)
 
 
 class FileErrorProblem(BadRequestException):
@@ -493,10 +519,95 @@ class FileImporter:
 
         return imported
 
+    def import_from_path(self) -> Path:
+        """Import a file from a given path."""
+
+        try:
+            self.notify(ImportEventType.START_DATA_EXTRACTION, self.pending_file)
+
+            upload_dir_name = Path(
+                f"{UPLOAD_DIR_PREFIX}"
+                f"{str(unique_name_generator())}"
+            )
+            self.upload_dir = FILE_ROOT_PATH / upload_dir_name
+            self.mkdir(self.upload_dir)
+
+            if self.pending_name:
+                name = self.pending_name
+            else:
+                name = self.pending_file.name
+            self.upload_path = self.upload_dir / name
+
+            self.mksymlink(self.upload_path, self.pending_file)
+
+            self.notify(
+                ImportEventType.MOVED_PENDING_FILE,
+                self.pending_file,
+                self.upload_path,
+            )
+            self.notify(ImportEventType.END_DATA_EXTRACTION, self.upload_path)
+
+            self.notify(ImportEventType.START_FORMAT_DETECTION, self.upload_path)
+
+            format_factory = ImportableFormatFactory()
+            format = format_factory.match(self.upload_path)
+
+            if format is None:
+                self.notify(ImportEventType.ERROR_NO_FORMAT, self.upload_path)
+                raise NoMatchingFormatProblem(self.upload_path)
+            self.notify(
+                ImportEventType.END_FORMAT_DETECTION,
+                self.upload_path, format
+            )
+
+            self.processed_dir = self.upload_dir / Path(PROCESSED_DIR)
+            self.mkdir(self.processed_dir)
+
+            original_filename = Path(f"{ORIGINAL_STEM}.{format.get_identifier()}")
+            self.original_path = self.processed_dir / original_filename
+   
+            self.mksymlink(self.original_path, self.upload_path)
+            assert self.original_path.has_original_role()
+
+            self.notify(ImportEventType.START_INTEGRITY_CHECK, self.original_path)
+            self.original = Image(self.original_path, format=format)
+            errors = self.original.check_integrity(check_metadata=True)
+            if len(errors) > 0:
+                self.notify(
+                    ImportEventType.ERROR_INTEGRITY_CHECK,
+                    self.original_path,
+                    integrity_errors=errors,
+                )
+                raise ImageParsingProblem(self.original)
+            self.notify(ImportEventType.END_INTEGRITY_CHECK, self.original)
+
+            if not format.is_spatial():
+                raise NotImplementedError()
+
+            self.deploy_spatial(format)
+
+            self.deploy_histogram(self.original.get_spatial())
+
+            self.notify(
+                ImportEventType.END_SUCCESSFUL_IMPORT,
+                self.upload_path,
+                self.original,
+            )
+            return self.upload_path
+        except Exception as e:
+            self.notify(
+                ImportEventType.FILE_ERROR,
+                self.upload_path,
+                exception=e,
+            )
+            raise e
+
 
 def run_import(
-    filepath: str, name: str, extra_listeners: Optional[List[ImportListener]] = None,
-    prefer_copy: bool = False
+    filepath: str,
+    name: str,
+    extra_listeners: Optional[List[ImportListener]] = None,
+    prefer_copy: bool = False,
 ):
     pending_file = Path(filepath)
 
@@ -509,3 +620,134 @@ def run_import(
     listeners = [StdoutListener(name)] + extra_listeners
     fi = FileImporter(pending_file, name, listeners)
     fi.run(prefer_copy)
+
+
+def get_folder_size(folder_path) -> int:
+    """Get the total size in bytes of a folder."""
+    total_size = 0
+    for dirpath, _, filenames in os.walk(folder_path):
+        for file in filenames:
+            file_path = os.path.join(dirpath, file)
+            total_size += os.path.getsize(file_path)
+
+    return total_size
+
+
+def run_import_from_path(
+    dataset_path: str,
+    cytomine_auth: Tuple[str, str, str],
+    storage_id: int,
+    image_server_id: int,
+    user_id: int,
+) -> List[UploadedFile]:
+    """Run importer from a given path."""
+
+    uploaded_files = []
+    images_path = Path(os.path.join(dataset_path, "images"))
+    for item in images_path.iterdir():
+        if not item.is_dir():
+            continue
+
+        image_path = os.path.join(images_path, item)
+
+        uf = UploadedFile(
+            original_filename=item.name,
+            filename=image_path,
+            size=get_folder_size(image_path),
+            ext="",
+            content_type="",
+            id_storage=storage_id,
+            id_user=user_id,
+            id_image_server=image_server_id,
+            status=UploadedFile.UPLOADED,
+        )
+
+        listeners = [
+            StdoutListener(item.name),
+            CytomineListener(
+                cytomine_auth,
+                uf,
+                projects=ProjectCollection(),
+                user_properties=iter([]),
+            ),
+        ]
+
+        fi = FileImporter(Path(image_path), item.name, listeners)
+        fi.import_from_path()
+
+        uploaded_files.append(uf)
+
+    return uploaded_files
+
+
+def import_metadata(dataset_path: str, abstract_images: List[AbstractImage]) -> bool:
+    """Import metadata from a given path."""
+
+    metadata_path = os.path.join(dataset_path, "metadata")
+    files = [
+        file
+        for file in os.listdir(metadata_path)
+        if os.path.isfile(os.path.join(metadata_path, file))
+    ]
+    settings = get_settings()
+    fs = Crypt4GHFileSystem(
+        decode_key(settings.crypt4gh_private_key),
+    )
+
+    with TemporaryDirectory() as tmp_dir:
+        metadata_directory_path = os.path.join(tmp_dir, "metadata")
+        os.makedirs(metadata_directory_path, exist_ok=True)
+
+        for file in files:
+            with fs.open(os.path.join(metadata_path, file), "rb") as fp:
+                decrypted_data = fp.read()
+
+            with open(os.path.join(metadata_directory_path, file[:-5]), "wb") as fp:
+                fp.write(decrypted_data)
+
+        with fs.open(
+            os.path.join(dataset_path, "private", "dac.xml.c4gh"),
+            "rb",
+        ) as fp:
+            decrypted_data = fp.read()
+
+        private_directory_path = os.path.join(tmp_dir, "metadata")
+        os.makedirs(private_directory_path, exist_ok=True)
+        with open(os.path.join(private_directory_path, "dac.xml"), "wb") as fp:
+            fp.write(decrypted_data)
+
+        if not BPInterface.validate(tmp_dir):
+            return False
+
+        studies, beings, datasets = BPInterface.parse_xml_files(tmp_dir)
+
+    metadata_parser = BPMetadataParser(studies, beings, datasets)
+
+    # Upload metadata file
+    for ai in abstract_images:
+        metadata = metadata_parser.parse({"image": ai.originalFilename})
+
+        properties = PropertyCollection(ai)
+        for key, value in metadata.items():
+            properties.append(
+                ai,
+                f"MSMDAD.{key}",
+                value,
+            )
+
+        properties.save()
+
+    return True
+
+
+def decode_key(key: str) -> PrivateKey:
+    """Decode the key and extract the private key."""
+
+    NACL_KEY_LENGTH = SecretBox.KEY_SIZE
+
+    secret_key = b64decode(key)[-NACL_KEY_LENGTH:]
+
+    if len(secret_key) != NACL_KEY_LENGTH:
+        raise ValueError(f"The extracted key is not {NACL_KEY_LENGTH} bytes long!")
+
+    return PrivateKey(secret_key)

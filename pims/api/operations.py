@@ -11,35 +11,54 @@
 #  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #  * See the License for the specific language governing permissions and
 #  * limitations under the License.
+
 import logging
 import os
 import traceback
 from typing import Optional
-import aiofiles
 
+import aiofiles
 from cytomine import Cytomine
 from cytomine.models import (
-    Project, ProjectCollection, Storage, UploadedFile
+    AbstractImage,
+    ImageInstance,
+    Project,
+    ProjectCollection,
+    Storage,
+    UploadedFile,
 )
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from starlette.formparsers import (
+    MultiPartMessage,
+    MultiPartParser,
+    _user_safe_decode,
+)
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
-from starlette.formparsers import MultiPartMessage, MultiPartParser, _user_safe_decode
 
 from pims.api.exceptions import (
-    AuthenticationException, BadRequestException, CytomineProblem,
-    check_representation_existence
+    AuthenticationException,
+    BadRequestException,
+    CytomineProblem,
+    NotFoundException,
+    check_representation_existence,
 )
 from pims.api.utils.cytomine_auth import (
-    get_this_image_server, parse_authorization_header,
-    parse_request_token, sign_token
+    get_this_image_server,
+    parse_authorization_header,
+    parse_request_token,
+    sign_token,
 )
-from pims.api.utils.parameter import filepath_parameter, imagepath_parameter, sanitize_filename
+from pims.api.utils.parameter import (
+    filepath_parameter,
+    imagepath_parameter,
+    sanitize_filename,
+)
 from pims.api.utils.response import serialize_cytomine_model
 from pims.config import Settings, get_settings
 from pims.files.archive import make_zip_archive
 from pims.files.file import Path
-from pims.importer.importer import run_import
+from pims.importer.importer import import_metadata, run_import, run_import_from_path
 from pims.importer.listeners import CytomineListener
 from pims.tasks.queue import Task, send_task
 from pims.utils.iterables import ensure_list
@@ -56,7 +75,96 @@ router = APIRouter()
 
 cytomine_logger = logging.getLogger("pims.cytomine")
 
+REQUIRED_DIRECTORIES = ["images", "metadata"]
 WRITING_PATH = get_settings().writing_path
+
+
+def is_dataset_structured(dataset_path: str) -> bool:
+    """Check the structure of a dataset."""
+
+    missing_directories = [
+        directory
+        for directory in REQUIRED_DIRECTORIES
+        if not os.path.isdir(os.path.join(dataset_path, directory))
+    ]
+
+    return missing_directories == []
+
+
+@router.post("/import", tags=["Import"])
+def import_dataset(
+    request: Request,
+    host: str = Query(..., description="The Cytomine host"),
+    path: str = Query(..., description="The absolute path to the datasets to import"),
+    storage_id: int = Query(..., description="The storage where to import the dataset"),
+    config: Settings = Depends(get_settings)
+) -> JSONResponse:
+    """Import a dataset from a given absolute path."""
+
+    if not storage_id:
+        raise BadRequestException(detail="'storage' parameter is missing.")
+
+    if not os.path.exists(path):
+        raise NotFoundException(detail="The provided dataset path does not exist.")
+
+    datasets = [
+        dataset_path
+        for dataset in os.listdir(path)
+        if (dataset_path := os.path.join(path, dataset))
+        and is_dataset_structured(dataset_path)
+    ]
+
+    public_key, signature = parse_authorization_header(request.headers)
+    cytomine_auth = (host, config.cytomine_public_key, config.cytomine_private_key)
+
+    with Cytomine(*cytomine_auth, configure_logging=False) as c:
+        if not c.current_user:
+            raise AuthenticationException("PIMS authentication to Cytomine failed.")
+
+        this = get_this_image_server(config.pims_url)
+        cyto_keys = c.get(f"userkey/{public_key}/keys.json")
+        private_key = cyto_keys["privateKey"]
+
+        if sign_token(private_key, parse_request_token(request)) != signature:
+            raise AuthenticationException("Authentication to Cytomine failed")
+
+        c.set_credentials(public_key, private_key)
+        user = c.current_user
+
+        storage = Storage().fetch(storage_id)
+        if not storage:
+            raise CytomineProblem(f"Storage {storage_id} not found")
+
+    for dataset in datasets:
+        uploaded_files = run_import_from_path(
+            dataset,
+            cytomine_auth,
+            storage_id,
+            this.id,
+            user.id,
+        )
+
+        abstract_images = []
+        for uf in uploaded_files:
+            data = Cytomine.get_instance().get(
+                f"uploadedfile/{uf.id}/abstractimage.json"
+            )
+            abstract_images.append(AbstractImage().populate(data))
+
+        success = import_metadata(dataset, abstract_images)
+
+        project = Project(name=os.path.basename(dataset)).save()
+
+        for image in abstract_images:
+            ImageInstance(id_abstract_image=image.id, id_project=project.id).save()
+
+    return JSONResponse(
+        content={
+            "image_upload": len(uploaded_files) != 0,
+            "metadata_upload": success,
+        }
+    )
+
 
 @router.post('/upload', tags=['Import'])
 async def import_direct_chunks(

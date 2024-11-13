@@ -25,7 +25,7 @@ jobs:
       - name: Release check
         id: release
         run: |
-          if [[ ${{ github.ref_name }} =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+          if [[ ${{ github.ref_name }} =~ ^bp-(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
             echo "release=true" >> $GITHUB_OUTPUT
           else
             echo "release=false" >> $GITHUB_OUTPUT
@@ -44,6 +44,8 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           build-args: |
+            BMI=${{ secrets.BMI }}
+            CF=${{ secrets.CF }}
             ENTRYPOINT_SCRIPTS_VERSION=${{ vars.ENTRYPOINT_SCRIPTS_VERSION }}
             GUNICORN_VERSION=${{ vars.GUNICORN_VERSION }}
             OPENJPEG_URL=${{ vars.OPENJPEG_URL }}
