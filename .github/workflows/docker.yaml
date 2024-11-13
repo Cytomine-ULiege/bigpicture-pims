@@ -38,7 +38,6 @@ jobs:
           images: cytomineuliege/pims
           tags: |
             type=raw,value=${{ github.ref_name }}
-            type=raw,value=latest,enable=${{ steps.release.outputs.release }}
 
       - name: Build and push pims
         uses: docker/build-push-action@v4
@@ -70,7 +69,6 @@ jobs:
           images: cytomineuliege/pims-worker
           tags: |
             type=raw,value=${{ github.ref_name }}
-            type=raw,value=latest,enable=${{ steps.release.outputs.release }}
 
       - name: Build and push pims-worker
         uses: docker/build-push-action@v4
