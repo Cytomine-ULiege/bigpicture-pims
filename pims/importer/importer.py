@@ -732,7 +732,7 @@ def parse_metadata(dataset_path: str) -> Optional[Tuple[Any, Any, Any]]:
         ) as fp:
             decrypted_data = fp.read()
 
-        private_directory_path = os.path.join(tmp_dir, "METADATA")
+        private_directory_path = os.path.join(tmp_dir, "PRIVATE")
         os.makedirs(private_directory_path, exist_ok=True)
         with open(os.path.join(private_directory_path, "dac.xml"), "wb") as fp:
             fp.write(decrypted_data)
