@@ -13,10 +13,12 @@ from bigpicture_metadata_interface.model import (
     CodeAttributes,
     DACContact,
     Dataset,
+    File,
     Sample,
     Stain,
     Statement,
     Study,
+    Reference,
 )
 
 BP_MODEL = (
@@ -24,9 +26,11 @@ BP_MODEL = (
     BaseObject,
     Code,
     DACContact,
+    File,
     Sample,
     Stain,
     Statement,
+    Reference,
 )
 
 
@@ -92,17 +96,17 @@ class BPMetadataParser:
         self.parsed[prefix] = primitive
 
         # Filters
-        substring = f"{self.filters['image']}.slide.alias"
+        substring = f"{self.filters['image']}.slide.identifier"
         if self.filters["image"] and substring in prefix:
             self.filters["slide"] = self.parsed[prefix]
 
         substring = f"slides.{self.filters['slide']}.id"
         if self.filters["slide"] and substring in prefix:
-            if "Observation_" in prefix:
-                start = prefix.find("Observation_")
+            if "OBSERVATION_" in prefix:
+                start = prefix.find("OBSERVATION_")
                 self.filters["obs"] = prefix[start : start + 22]
             else:
-                start = prefix.find("BiologicalBeing_")
+                start = prefix.find("BIOLOGICAL_BEING_")
                 self.filters["being"] = prefix[start : start + 26]
 
     def _parse_dict(self, d: dict, prefix: str) -> None:
@@ -129,7 +133,11 @@ class BPMetadataParser:
             self._parse_primitive(l, prefix)
 
         for item in l:
-            suffix = item.alias if hasattr(item, "alias") else type(item).__name__
+            suffix = (
+                item.reference.identifier
+                if hasattr(item, "reference")
+                else type(item).__name__
+            )
             self.parser.get(type(item), self.parser["any"])(item, f"{prefix}.{suffix}")
 
     def parse_dataclass(self, data: dataclass, prefix: str = None) -> None:
@@ -144,13 +152,14 @@ class BPMetadataParser:
         """
 
         if prefix is None:
-            prefix = data.alias
+            prefix = data.reference.identifier
 
         for field in fields(data):
             attribute = getattr(data, field.name)
 
             self.parser.get(type(attribute), self.parser["any"])(
-                attribute, f"{prefix}.{field.name}"
+                attribute,
+                f"{prefix}.{field.name}",
             )
 
     def _filter(self) -> dict:
@@ -165,10 +174,10 @@ class BPMetadataParser:
         if self.filters["image"] is None:
             return self.parsed
 
-        dataset = {k: v for k, v in self.parsed.items() if k.startswith("Dataset")}
-        base = {k: v for k, v in self.parsed.items() if k.startswith("Study")}
+        dataset = {k: v for k, v in self.parsed.items() if k.startswith("DATASET")}
+        base = {k: v for k, v in self.parsed.items() if k.startswith("STUDY")}
         beings = {
-            k: v for k, v in self.parsed.items() if k.startswith("BiologicalBeing")
+            k: v for k, v in self.parsed.items() if k.startswith("BIOLOGICAL_BEING")
         }
 
         # Filter the Dataset with the Observation linked to the slide
@@ -208,13 +217,13 @@ class BPMetadataParser:
             self.filters.update(filters)
 
         for dataset in self.datasets:
-            self.parser.get("any")(dataset, dataset.alias)
+            self.parser.get("any")(dataset, dataset.reference.identifier)
 
         for study in self.studies:
-            self.parser.get("any")(study, study.alias)
+            self.parser.get("any")(study, study.reference.identifier)
 
         for being in self.beings:
-            self.parser.get("any")(being, being.alias)
+            self.parser.get("any")(being, being.reference.identifier)
 
         self._remove_empty_variables()
 

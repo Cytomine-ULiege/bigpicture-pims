@@ -16,20 +16,23 @@ import logging
 import os
 import shutil
 from base64 import b64decode
+from datetime import datetime
 from tempfile import TemporaryDirectory
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
+from uuid import UUID
 
 from bigpicture_metadata_interface import BPInterface
 from celery import group, signature
 from celery.result import allow_join_result
 from crypt4gh_fsspec import Crypt4GHFileSystem
-from cytomine.cytomine import Cytomine
+from crypt4gh_fsspec.crypt4gh_file import Crypt4GHMagic
 from cytomine.models import (
     AbstractImage,
     ProjectCollection,
-    PropertyCollection,
+    Property,
     UploadedFile,
 )
+from isodate.duration import Duration
 from nacl.public import PrivateKey
 from nacl.secret import SecretBox
 
@@ -643,7 +646,7 @@ def run_import_from_path(
     """Run importer from a given path."""
 
     uploaded_files = []
-    images_path = Path(os.path.join(dataset_path, "images"))
+    images_path = Path(os.path.join(dataset_path, "IMAGES"))
     for item in images_path.iterdir():
         if not item.is_dir():
             continue
@@ -680,22 +683,40 @@ def run_import_from_path(
     return uploaded_files
 
 
-def import_metadata(dataset_path: str, abstract_images: List[AbstractImage]) -> bool:
-    """Import metadata from a given path."""
+def is_encrypted(file_path: Path) -> bool:
+    """Check if the file is encrypted."""
 
-    metadata_path = os.path.join(dataset_path, "metadata")
+    with open(file_path, "rb") as file:
+        if Crypt4GHMagic(file).is_crypt4gh():
+            return True
+
+    return False
+
+
+def parse_metadata(dataset_path: str) -> Optional[Tuple[Any, Any, Any]]:
+    """Parse metadata from a given path."""
+
+    metadata_path = os.path.join(dataset_path, "METADATA")
     files = [
         file
         for file in os.listdir(metadata_path)
         if os.path.isfile(os.path.join(metadata_path, file))
     ]
+    encrypted = any(is_encrypted(os.path.join(metadata_path, file)) for file in files)
+
+    if not encrypted:
+        if not BPInterface.validate(dataset_path):
+            return None
+
+        return BPInterface.parse_xml_files(dataset_path)
+
     settings = get_settings()
     fs = Crypt4GHFileSystem(
         decode_key(settings.crypt4gh_private_key),
     )
 
     with TemporaryDirectory() as tmp_dir:
-        metadata_directory_path = os.path.join(tmp_dir, "metadata")
+        metadata_directory_path = os.path.join(tmp_dir, "METADATA")
         os.makedirs(metadata_directory_path, exist_ok=True)
 
         for file in files:
@@ -706,36 +727,44 @@ def import_metadata(dataset_path: str, abstract_images: List[AbstractImage]) -> 
                 fp.write(decrypted_data)
 
         with fs.open(
-            os.path.join(dataset_path, "private", "dac.xml.c4gh"),
+            os.path.join(dataset_path, "PRIVATE", "dac.xml.c4gh"),
             "rb",
         ) as fp:
             decrypted_data = fp.read()
 
-        private_directory_path = os.path.join(tmp_dir, "metadata")
+        private_directory_path = os.path.join(tmp_dir, "PRIVATE")
         os.makedirs(private_directory_path, exist_ok=True)
         with open(os.path.join(private_directory_path, "dac.xml"), "wb") as fp:
             fp.write(decrypted_data)
 
         if not BPInterface.validate(tmp_dir):
-            return False
+            return None
 
-        studies, beings, datasets = BPInterface.parse_xml_files(tmp_dir)
+        return BPInterface.parse_xml_files(tmp_dir)
 
+    return None
+
+
+def import_metadata(dataset_path: str, abstract_images: List[AbstractImage]) -> bool:
+    """Import metadata from a given path."""
+
+    data = parse_metadata(dataset_path)
+    if data is None:
+        return False
+
+    studies, beings, datasets = data
     metadata_parser = BPMetadataParser(studies, beings, datasets)
 
     # Upload metadata file
     for ai in abstract_images:
         metadata = metadata_parser.parse({"image": ai.originalFilename})
-
-        properties = PropertyCollection(ai)
         for key, value in metadata.items():
-            properties.append(
+            v = str(value) if isinstance(value, (datetime, Duration, UUID)) else value
+            Property(
                 ai,
                 f"MSMDAD.{key}",
-                value,
-            )
-
-        properties.save()
+                v,
+            ).save()
 
     return True
 
