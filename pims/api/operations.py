@@ -75,17 +75,23 @@ router = APIRouter()
 
 cytomine_logger = logging.getLogger("pims.cytomine")
 
-REQUIRED_DIRECTORIES = ["images", "metadata"]
+REQUIRED_DIRECTORIES = ["IMAGES", "METADATA"]
 WRITING_PATH = get_settings().writing_path
 
 
 def is_dataset_structured(dataset_path: str) -> bool:
     """Check the structure of a dataset."""
 
+    actual_directories = {
+        d.upper()
+        for d in os.listdir(dataset_path)
+        if os.path.isdir(os.path.join(dataset_path, d))
+    }
+
     missing_directories = [
         directory
         for directory in REQUIRED_DIRECTORIES
-        if not os.path.isdir(os.path.join(dataset_path, directory))
+        if directory not in actual_directories
     ]
 
     return missing_directories == []
@@ -135,6 +141,8 @@ def import_dataset(
         if not storage:
             raise CytomineProblem(f"Storage {storage_id} not found")
 
+    dataset_uploaded = []
+    metadata_uploaded = []
     for dataset in datasets:
         uploaded_files = run_import_from_path(
             dataset,
@@ -151,17 +159,22 @@ def import_dataset(
             )
             abstract_images.append(AbstractImage().populate(data))
 
+        dataset_name = os.path.basename(dataset)
         success = import_metadata(dataset, abstract_images)
+        if success:
+            metadata_uploaded.append(dataset_name)
 
-        project = Project(name=os.path.basename(dataset)).save()
+        project = Project(name=dataset_name).save()
 
         for image in abstract_images:
             ImageInstance(id_abstract_image=image.id, id_project=project.id).save()
 
+        dataset_uploaded.append(dataset_name)
+
     return JSONResponse(
         content={
-            "image_upload": len(uploaded_files) != 0,
-            "metadata_upload": success,
+            "dataset_uploaded": dataset_uploaded,
+            "metadata_uploaded": metadata_uploaded,
         }
     )
 
