@@ -687,7 +687,6 @@ def run_import_from_path(
     dataset_path: str,
     cytomine_auth: Tuple[str, str, str],
     storage_id: int,
-    image_server_id: int,
     user_id: int,
 ) -> List[UploadedFile]:
     """Run importer from a given path."""
@@ -708,7 +707,6 @@ def run_import_from_path(
             content_type="",
             id_storage=storage_id,
             id_user=user_id,
-            id_image_server=image_server_id,
             status=UploadedFile.UPLOADED,
         )
 

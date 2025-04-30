@@ -11,13 +11,11 @@ from bigpicture_metadata_interface.model import (
     BiologicalBeing,
     Code,
     CodeAttributes,
-    DACContact,
     Dataset,
     File,
     Sample,
     Stain,
     Statement,
-    Study,
     Reference,
 )
 
@@ -25,7 +23,6 @@ BP_MODEL = (
     AttributesObject,
     BaseObject,
     Code,
-    DACContact,
     File,
     Sample,
     Stain,
@@ -39,11 +36,9 @@ class BPMetadataParser:
 
     def __init__(
         self,
-        studies: List[Study],
         beings: List[BiologicalBeing],
         datasets: List[Dataset],
     ) -> None:
-        self.studies = studies
         self.beings = beings
         self.datasets = datasets
 
@@ -175,7 +170,7 @@ class BPMetadataParser:
             return self.parsed
 
         dataset = {k: v for k, v in self.parsed.items() if k.startswith("DATASET")}
-        base = {k: v for k, v in self.parsed.items() if k.startswith("STUDY")}
+        base = {}
         beings = {
             k: v for k, v in self.parsed.items() if k.startswith("BIOLOGICAL_BEING")
         }
@@ -218,9 +213,6 @@ class BPMetadataParser:
 
         for dataset in self.datasets:
             self.parser.get("any")(dataset, dataset.reference.identifier)
-
-        for study in self.studies:
-            self.parser.get("any")(study, study.reference.identifier)
 
         for being in self.beings:
             self.parser.get("any")(being, being.reference.identifier)
