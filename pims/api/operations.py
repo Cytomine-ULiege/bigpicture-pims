@@ -75,7 +75,7 @@ cytomine_logger = logging.getLogger("pims.cytomine")
 REQUIRED_DIRECTORIES = ["IMAGES", "METADATA"]
 WRITING_PATH = get_settings().writing_path
 INTERNAL_URL_CORE = get_settings().internal_url_core
-
+DATASET_PATH = get_settings().dataset_path
 
 
 def is_dataset_structured(dataset_path: str) -> bool:
@@ -100,7 +100,6 @@ def is_dataset_structured(dataset_path: str) -> bool:
 def import_dataset(
     request: Request,
     host: str = Query(..., description="The Cytomine host"),
-    path: str = Query(..., description="The absolute path to the datasets to import"),
     storage_id: int = Query(..., description="The storage where to import the dataset"),
     config: Settings = Depends(get_settings)
 ) -> JSONResponse:
@@ -109,13 +108,10 @@ def import_dataset(
     if not storage_id:
         raise BadRequestException(detail="'storage' parameter is missing.")
 
-    if not os.path.exists(path):
-        raise NotFoundException(detail="The provided dataset path does not exist.")
-
     datasets = [
         dataset_path
-        for dataset in os.listdir(path)
-        if (dataset_path := os.path.join(path, dataset))
+        for dataset in os.listdir(DATASET_PATH)
+        if (dataset_path := os.path.join(DATASET_PATH, dataset))
         and is_dataset_structured(dataset_path)
     ]
 
