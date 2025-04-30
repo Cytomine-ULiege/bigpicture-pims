@@ -40,7 +40,6 @@ from pims.api.exceptions import (
     check_representation_existence,
 )
 from pims.api.utils.cytomine_auth import (
-    get_this_image_server,
     parse_authorization_header,
     parse_request_token,
     sign_token,
@@ -127,7 +126,6 @@ def import_dataset(
         if not c.current_user:
             raise AuthenticationException("PIMS authentication to Cytomine failed.")
 
-        this = get_this_image_server(config.pims_url)
         cyto_keys = c.get(f"userkey/{public_key}/keys.json")
         private_key = cyto_keys["privateKey"]
 
@@ -148,7 +146,6 @@ def import_dataset(
             dataset,
             cytomine_auth,
             storage_id,
-            this.id,
             user.id,
         )
 
