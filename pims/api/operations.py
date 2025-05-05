@@ -75,7 +75,7 @@ cytomine_logger = logging.getLogger("pims.cytomine")
 REQUIRED_DIRECTORIES = ["IMAGES", "METADATA"]
 WRITING_PATH = get_settings().writing_path
 INTERNAL_URL_CORE = get_settings().internal_url_core
-
+DATASET_PATH = get_settings().dataset_path
 
 
 def is_dataset_structured(dataset_path: str) -> bool:
@@ -99,8 +99,6 @@ def is_dataset_structured(dataset_path: str) -> bool:
 @router.post("/import", tags=["Import"])
 def import_dataset(
     request: Request,
-    host: str = Query(..., description="The Cytomine host"),
-    path: str = Query(..., description="The absolute path to the datasets to import"),
     storage_id: int = Query(..., description="The storage where to import the dataset"),
     config: Settings = Depends(get_settings)
 ) -> JSONResponse:
@@ -109,18 +107,19 @@ def import_dataset(
     if not storage_id:
         raise BadRequestException(detail="'storage' parameter is missing.")
 
-    if not os.path.exists(path):
-        raise NotFoundException(detail="The provided dataset path does not exist.")
-
     datasets = [
         dataset_path
-        for dataset in os.listdir(path)
-        if (dataset_path := os.path.join(path, dataset))
+        for dataset in os.listdir(DATASET_PATH)
+        if (dataset_path := os.path.join(DATASET_PATH, dataset))
         and is_dataset_structured(dataset_path)
     ]
 
     public_key, signature = parse_authorization_header(request.headers)
-    cytomine_auth = (host, config.cytomine_public_key, config.cytomine_private_key)
+    cytomine_auth = (
+        INTERNAL_URL_CORE,
+        config.cytomine_public_key,
+        config.cytomine_private_key
+    )
 
     with Cytomine(*cytomine_auth, configure_logging=False) as c:
         if not c.current_user:
@@ -138,6 +137,11 @@ def import_dataset(
         storage = Storage().fetch(storage_id)
         if not storage:
             raise CytomineProblem(f"Storage {storage_id} not found")
+
+        # Filter out existing datasets
+        projects = ProjectCollection().fetch()
+        project_names = [project.name for project in projects]
+        datasets = [ds for ds in datasets if os.path.basename(ds) not in project_names]
 
     dataset_uploaded = []
     metadata_uploaded = []

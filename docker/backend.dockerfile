@@ -131,10 +131,11 @@ RUN python plugins.py \
 RUN rm -rf /var/lib/apt/lists/*
 
 # Install private dependencies
-ARG BMI
-ARG CF
-
-RUN pip install --no-cache-dir ${CF} ${BMI}
+ARG GITHUB_TOKEN
+ENV GITHUB_TOKEN=${GITHUB_TOKEN}
+RUN pip install --no-cache-dir \
+    git+https://${GITHUB_TOKEN}@github.com/imi-bigpicture/crypt4gh-fsspec.git@v0.1.0 \
+    git+https://${GITHUB_TOKEN}@github.com/imi-bigpicture/bigpicture-metadata-interface.git@v2.0.2
 
 # Install python requirements
 ARG GUNICORN_VERSION=22.0.0
@@ -151,7 +152,7 @@ RUN pip install --no-cache-dir gunicorn==${GUNICORN_VERSION} && \
 
 # Add default config
 COPY ./pims-config.env /app/pims-config.env
-COPY ./logging-prod.yml /app/logging-prod.yml
+COPY ./logging-prod.yml /app/logging.yml
 COPY ./docker/gunicorn_conf.py /app/gunicorn_conf.py
 
 COPY ./docker/start.sh /start.sh
