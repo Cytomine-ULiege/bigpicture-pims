@@ -99,7 +99,6 @@ def is_dataset_structured(dataset_path: str) -> bool:
 @router.post("/import", tags=["Import"])
 def import_dataset(
     request: Request,
-    host: str = Query(..., description="The Cytomine host"),
     storage_id: int = Query(..., description="The storage where to import the dataset"),
     config: Settings = Depends(get_settings)
 ) -> JSONResponse:
@@ -116,7 +115,11 @@ def import_dataset(
     ]
 
     public_key, signature = parse_authorization_header(request.headers)
-    cytomine_auth = (host, config.cytomine_public_key, config.cytomine_private_key)
+    cytomine_auth = (
+        INTERNAL_URL_CORE,
+        config.cytomine_public_key,
+        config.cytomine_private_key
+    )
 
     with Cytomine(*cytomine_auth, configure_logging=False) as c:
         if not c.current_user:
