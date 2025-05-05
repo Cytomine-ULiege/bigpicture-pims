@@ -138,6 +138,11 @@ def import_dataset(
         if not storage:
             raise CytomineProblem(f"Storage {storage_id} not found")
 
+        # Filter out existing datasets
+        projects = ProjectCollection().fetch()
+        project_names = [project.name for project in projects]
+        datasets = [ds for ds in datasets if os.path.basename(ds) not in project_names]
+
     dataset_uploaded = []
     metadata_uploaded = []
     for dataset in datasets:
