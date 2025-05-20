@@ -1,2 +1,2 @@
 enabled,name,git_url,git_branch_or_tag,resolution_order
-1,pims-plugin-format-dicom,https://github.com/Cytomine-ULiege/pims-plugin-format-dicom.git,bp-0.3.0,1
+1,pims-plugin-format-dicom,https://github.com/Cytomine-ULiege/pims-plugin-format-dicom.git,bp-0.3.1,1
