@@ -96,6 +96,8 @@ class AbstractFormat(ABC, SimpleDataCache):
         credentials = {
             "public_key": settings.crypt4gh_public_key,
             "private_key": settings.crypt4gh_private_key,
+            "passphrase": settings.crypt4gh_passphrase,
+            "keys_path": settings.keys_path,
         }
 
         for component in (self.parser, self.reader):
@@ -203,6 +205,8 @@ class AbstractFormat(ABC, SimpleDataCache):
                 cls.checker_class.CREDENTIALS = {
                     "public_key": settings.crypt4gh_public_key,
                     "private_key": settings.crypt4gh_private_key,
+                    "passphrase": settings.crypt4gh_passphrase,
+                    "keys_path": settings.keys_path,
                 }
 
             return cls.checker_class.match(cached_path)

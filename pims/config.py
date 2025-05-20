@@ -72,6 +72,8 @@ class Settings(ReadableSettings):
 
     crypt4gh_public_key: str
     crypt4gh_private_key: str
+    crypt4gh_passphrase: str
+    keys_path: str
 
     cytomine_public_key: str
     cytomine_private_key: str

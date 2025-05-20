@@ -25,6 +25,7 @@ from typing import List, Optional
 from bigpicture_metadata_interface import BPInterface
 from celery import group, signature
 from celery.result import allow_join_result
+from crypt4gh.keys import get_private_key
 from crypt4gh_fsspec import Crypt4GHFileSystem
 from crypt4gh_fsspec.crypt4gh_file import Crypt4GHMagic
 from cytomine.models import (
@@ -751,13 +752,18 @@ def parse_metadata(dataset_path: str) -> Optional[Tuple[Any, Any, Any]]:
 
     if not encrypted:
         if not BPInterface.validate(dataset_path):
+            log.warning(f"Metadata validation failed for {dataset_path}")
             return None
 
         return BPInterface.parse_xml_files(dataset_path)
 
     settings = get_settings()
+    crypt4gh_private_key_path = os.path.join(
+        settings.keys_path,
+        settings.crypt4gh_private_key,
+    )
     fs = Crypt4GHFileSystem(
-        decode_key(settings.crypt4gh_private_key),
+        decode_key_from_file(crypt4gh_private_key_path),
     )
 
     with TemporaryDirectory() as tmp_dir:
@@ -771,18 +777,21 @@ def parse_metadata(dataset_path: str) -> Optional[Tuple[Any, Any, Any]]:
             with open(os.path.join(metadata_directory_path, file[:-5]), "wb") as fp:
                 fp.write(decrypted_data)
 
-        with fs.open(
-            os.path.join(dataset_path, "PRIVATE", "dac.xml.c4gh"),
-            "rb",
-        ) as fp:
-            decrypted_data = fp.read()
+        dac_path = os.path.join(dataset_path, "PRIVATE", "dac.xml.c4gh")
+        if os.path.exists(dac_path):
+            with fs.open(
+                os.path.join(dataset_path, "PRIVATE", "dac.xml.c4gh"),
+                "rb",
+            ) as fp:
+                decrypted_data = fp.read()
 
-        private_directory_path = os.path.join(tmp_dir, "PRIVATE")
-        os.makedirs(private_directory_path, exist_ok=True)
-        with open(os.path.join(private_directory_path, "dac.xml"), "wb") as fp:
-            fp.write(decrypted_data)
+            private_directory_path = os.path.join(tmp_dir, "PRIVATE")
+            os.makedirs(private_directory_path, exist_ok=True)
+            with open(os.path.join(private_directory_path, "dac.xml"), "wb") as fp:
+                fp.write(decrypted_data)
 
         if not BPInterface.validate(tmp_dir):
+            log.warning(f"Metadata validation failed for {dataset_path}")
             return None
 
         return BPInterface.parse_xml_files(tmp_dir)
@@ -813,15 +822,10 @@ def import_metadata(dataset_path: str, abstract_images: List[AbstractImage]) -> 
 
     return True
 
+def decode_key_from_file(key_path: str) -> PrivateKey:
+    """Decode the key from a file and extract the private key."""
 
-def decode_key(key: str) -> PrivateKey:
-    """Decode the key and extract the private key."""
+    def get_passphrase():
+        return get_settings().crypt4gh_passphrase
 
-    NACL_KEY_LENGTH = SecretBox.KEY_SIZE
-
-    secret_key = b64decode(key)[-NACL_KEY_LENGTH:]
-
-    if len(secret_key) != NACL_KEY_LENGTH:
-        raise ValueError(f"The extracted key is not {NACL_KEY_LENGTH} bytes long!")
-
-    return PrivateKey(secret_key)
+    return get_private_key(key_path, get_passphrase)
